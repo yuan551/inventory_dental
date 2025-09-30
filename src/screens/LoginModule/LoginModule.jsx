@@ -3,7 +3,7 @@ import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
 
-export const LoginModule = (): JSX.Element => {
+export const LoginModule = () => {
   return (
     <div className="bg-white overflow-hidden w-full min-w-[1920px] h-[1080px] relative">
       <div className="absolute top-[423px] left-[1386px] [font-family:'Inter',Helvetica] font-normal text-white text-2xl tracking-[0] leading-[normal]">
