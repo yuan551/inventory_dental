@@ -1,7 +1,8 @@
 import React from "react";
 import { Card, CardContent } from "../../../../components/ui/card";
 
-export const InventoryOverviewSection = () => {
+export const InventoryOverviewSection = ({ totalValue = 0 }) => {
+  const formatted = new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP', maximumFractionDigits: 0 }).format(totalValue || 0);
   return (
     <Card className="bg-white rounded-xl shadow-lg hover:shadow-xl transition-shadow border border-gray-100">
       <CardContent className="p-4">
@@ -11,7 +12,7 @@ export const InventoryOverviewSection = () => {
               Inventory Value
             </div>
             <div className="[font-family:'Inter',Helvetica] font-bold text-gray-900 text-2xl mb-1">
-              ₱23,000
+              {formatted}
             </div>
             <div className="[font-family:'Oxygen',Helvetica] font-normal text-gray-500 text-xs">
               Total inventory value

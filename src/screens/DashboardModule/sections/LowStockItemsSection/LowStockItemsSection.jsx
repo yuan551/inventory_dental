@@ -1,7 +1,7 @@
 import React from "react";
 import { Card, CardContent } from "../../../../components/ui/card";
 
-export const LowStockItemsSection = () => {
+export const LowStockItemsSection = ({ count = 0 }) => {
   return (
     <Card className="bg-white rounded-xl shadow-lg hover:shadow-xl transition-shadow border border-gray-100">
       <CardContent className="p-4">
@@ -11,7 +11,7 @@ export const LowStockItemsSection = () => {
               Low Stock Items
             </div>
             <div className="[font-family:'Inter',Helvetica] font-bold text-gray-900 text-2xl mb-1">
-              12
+              {count}
             </div>
             <div className="[font-family:'Oxygen',Helvetica] font-normal text-gray-500 text-xs">
               Total low stock items
