@@ -1,99 +1,167 @@
-import React from "react";
+import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { signInWithEmailAndPassword } from "firebase/auth";
+import { auth } from "../../firebase";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
 
 export const LoginModule = () => {
+  const navigate = useNavigate();
+  const [formData, setFormData] = useState({
+    email: "",
+    password: ""
+  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+
+    if (!formData.email || !formData.password) {
+      setError("Please fill in all fields");
+      setLoading(false);
+      return;
+    }
+
+    try {
+      await signInWithEmailAndPassword(auth, formData.email, formData.password);
+      console.log("User logged in successfully!");
+      navigate("/dashboard");
+    } catch (error) {
+      console.error("Login error:", error);
+      setError("Invalid email or password");
+    } finally {
+      setLoading(false);
+    }
+  };
   return (
-    <div className="bg-white overflow-hidden w-full min-w-[1920px] h-[1080px] relative">
-      <div className="absolute top-[423px] left-[1386px] [font-family:'Inter',Helvetica] font-normal text-white text-2xl tracking-[0] leading-[normal]">
-        DR
-      </div>
+    <div className="bg-white h-screen w-full flex overflow-hidden">
+      {/* Left side - Login Form */}
+      <div className="flex-1 flex flex-col justify-center px-8 lg:px-16 xl:px-24 max-w-2xl overflow-y-auto">
+        <div className="w-full max-w-md mx-auto lg:mx-0 py-8">
+          <h1 className="[font-family:'Inter',Helvetica] font-extrabold text-[#00b7c2] text-4xl lg:text-5xl mb-6">
+            Login
+          </h1>
 
-      <div className="absolute top-0 left-[960px] w-[960px] h-[1080px] bg-[#00b7c2]" />
+          <p className="[font-family:'Oxygen',Helvetica] font-normal text-[#42424280] text-lg lg:text-xl mb-8">
+            Welcome back! Please login to your <br />
+            account.
+          </p>
 
-      <div className="top-[-245px] left-[752px] absolute w-[511px] h-[490px] bg-[#ffffff1a] rounded-[255.5px/245px]" />
+          {error && (
+            <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-lg">
+              {error}
+            </div>
+          )}
 
-      <div className="top-[883px] left-[1686px] absolute w-[511px] h-[490px] bg-[#ffffff1a] rounded-[255.5px/245px]" />
+          <form onSubmit={handleSubmit}>
+            <div className="space-y-6">
+              <div>
+                <Label className="[font-family:'Oxygen',Helvetica] font-normal text-[#42424280] text-lg lg:text-xl mb-2 block">
+                  Email
+                </Label>
+                <Input
+                  name="email"
+                  value={formData.email}
+                  onChange={handleInputChange}
+                  className="w-full h-16 lg:h-18 bg-white rounded-[30px] border-2 border-solid border-[#00b7c2] px-6 lg:px-9 [font-family:'Source_Code_Pro',Helvetica] font-normal text-[#42424280] text-lg lg:text-xl"
+                  placeholder="username@gmail.com"
+                  type="email"
+                  required
+                />
+              </div>
 
-      <div className="absolute top-[219px] left-[218px] [font-family:'Inter',Helvetica] font-extrabold text-[#00b7c2] text-5xl tracking-[0] leading-[normal]">
-        Login
-      </div>
+              <div>
+                <Label className="[font-family:'Oxygen',Helvetica] font-normal text-[#42424280] text-lg lg:text-xl mb-2 block">
+                  Password
+                </Label>
+                <Input
+                  name="password"
+                  value={formData.password}
+                  onChange={handleInputChange}
+                  className="w-full h-16 lg:h-18 bg-white rounded-[30px] border-2 border-solid border-[#00b7c2] px-6 lg:px-9 [font-family:'Source_Code_Pro',Helvetica] font-normal text-[#42424280] text-lg lg:text-xl"
+                  placeholder="Password"
+                  type="password"
+                  required
+                />
+              </div>
 
-      <Label className="absolute top-[397px] left-[218px] [font-family:'Oxygen',Helvetica] font-normal text-[#42424280] text-2xl tracking-[0] leading-[normal]">
-        Username
-      </Label>
+              <div className="flex justify-end">
+                <button type="button" className="[font-family:'Oxygen',Helvetica] font-normal text-[#42424280] text-sm lg:text-base underline bg-transparent border-none cursor-pointer">
+                  Forgot Password?
+                </button>
+              </div>
 
-      <Label className="absolute top-[535px] left-[218px] [font-family:'Oxygen',Helvetica] font-normal text-[#42424280] text-2xl tracking-[0] leading-[normal]">
-        Password
-      </Label>
+              <Button 
+                type="submit" 
+                disabled={loading}
+                className="w-full h-16 lg:h-18 bg-[#00b7c2] rounded-[30px] border-0 [font-family:'Inter',Helvetica] font-bold text-white text-xl lg:text-2xl hover:bg-[#009ba5] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loading ? "Logging in..." : "Login"}
+              </Button>
+            </div>
+          </form>
 
-      <button className="absolute top-[656px] left-[602px] h-[19px] flex items-center justify-center [font-family:'Oxygen',Helvetica] font-normal text-[#42424280] text-[15px] tracking-[0] leading-[normal] underline bg-transparent border-none cursor-pointer">
-        Forgot Password?
-      </button>
-
-      <div className="absolute top-[839px] left-[380px] h-[19px] flex items-center justify-center [font-family:'Oxygen',Helvetica] font-normal text-[#42424280] text-[15px] tracking-[0] leading-[normal]">
-        <span className="[font-family:'Oxygen',Helvetica] font-normal text-[#42424280] text-[15px] tracking-[0]">
-          New User?{" "}
-        </span>
-
-        <button className="underline bg-transparent border-none cursor-pointer text-[#42424280]">
-          Create Account
-        </button>
-      </div>
-
-      <div className="absolute top-[281px] left-[218px] [font-family:'Oxygen',Helvetica] font-normal text-[#42424280] text-2xl tracking-[0] leading-[normal]">
-        Welcome back! Please login to your <br />
-        account.
-      </div>
-
-      <div className="absolute top-[434px] left-[218px] w-[504px] h-[72px]">
-        <Input
-          className="w-full h-full bg-white rounded-[30px] border-2 border-solid border-[#00b7c2] px-9 [font-family:'Source_Code_Pro',Helvetica] font-normal text-[#42424280] text-xl tracking-[0] leading-[normal]"
-          defaultValue="usersample@gmail.com"
-          type="email"
-        />
-      </div>
-
-      <div className="absolute top-[572px] left-[218px] w-[504px] h-[72px]">
-        <Input
-          className="w-full h-full bg-white rounded-[30px] border-2 border-solid border-[#00b7c2] px-9 [font-family:'Source_Code_Pro',Helvetica] font-normal text-[#42424280] text-xl tracking-[0] leading-[normal]"
-          defaultValue="***********"
-          type="password"
-        />
-      </div>
-
-      <Button className="absolute top-[704px] left-[218px] w-[504px] h-[72px] bg-[#00b7c2] rounded-[30px] border-0 border-none [font-family:'Inter',Helvetica] font-bold text-white text-2xl tracking-[0] leading-[normal] hover:bg-[#009ba5]">
-        Login
-      </Button>
-
-      <img
-        className="absolute w-0 h-0 top-[55.28%] left-[34.79%]"
-        alt="Vector"
-        src="/vector.svg"
-      />
-
-      <img
-        className="absolute top-[413px] left-[1108px] w-[664px] h-[667px]"
-        alt="Group"
-        src="/group-6.png"
-      />
-
-      <div className="absolute top-[260px] left-[1194px] w-[496px] h-[92px]">
-        <div className="absolute top-0 left-[93px] [font-family:'Inter',Helvetica] font-normal text-transparent text-[64px] leading-[normal]">
-          <span className="font-bold text-white tracking-[6.14px]">MEDI</span>
-
-          <span className="text-white tracking-[6.14px]">CARE</span>
+          <div className="text-center mt-4">
+            <span className="[font-family:'Oxygen',Helvetica] font-normal text-[#42424280] text-sm lg:text-base">
+              New User?{" "}
+            </span>
+            <button
+              type="button"
+              className="underline bg-transparent border-none cursor-pointer text-[#42424280] [font-family:'Oxygen',Helvetica] font-normal text-sm lg:text-base"
+              onClick={() => navigate("/register")}
+            >
+              Create Account
+            </button>
+          </div>
         </div>
+      </div>
 
-        <img
-          className="absolute w-[15.93%] h-[84.78%] top-[13.04%] left-0"
-          alt="Group"
-          src="/group.png"
-        />
+      {/* Right side - Dental Clinic Branding */}
+      <div className="hidden lg:flex flex-1 bg-[#00b7c2] relative overflow-hidden">
+        {/* Background decorative circles */}
+        <div className="absolute -top-32 -left-16 w-80 h-80 bg-[#ffffff1a] rounded-full"></div>
+        <div className="absolute -bottom-32 -right-16 w-80 h-80 bg-[#ffffff1a] rounded-full"></div>
+        
+        {/* Main content */}
+        <div className="relative z-10 flex flex-col items-center justify-center h-full w-full px-8">
+          {/* Logo and clinic name */}
+          <div className="mb-8">
+            <div className="flex items-center justify-center mb-4">
+              <img
+                className="w-16 h-16 mr-4"
+                alt="Group"
+                src="/group.png"
+              />
+              <div className="[font-family:'Inter',Helvetica] text-white">
+                <span className="font-bold text-4xl xl:text-5xl tracking-[6.14px]">MEDI</span>
+                <span className="text-4xl xl:text-5xl tracking-[6.14px]">CARE</span>
+              </div>
+            </div>
+            <div className="[font-family:'Inter',Helvetica] font-semibold text-white text-lg xl:text-xl tracking-[3.00px] text-center">
+              DENTAL CLINIC
+            </div>
+          </div>
 
-        <div className="absolute top-[68px] left-24 [font-family:'Inter',Helvetica] font-semibold text-white text-xl tracking-[3.00px] leading-[normal] whitespace-nowrap">
-          DENTAL CLINIC
+          {/* Doctor image */}
+          <div className="relative flex-1 flex items-center">
+            <img
+              className="w-full max-w-md xl:max-w-lg object-contain"
+              alt="Dental Professional"
+              src="/group-6.png"
+            />
+          </div>
         </div>
       </div>
     </div>
