@@ -1,5 +1,5 @@
 import { Bell as BellIcon, Search as SearchIcon, Filter as FilterIcon, Package as PackageIcon, X as XIcon, Calendar as CalendarIcon, ChevronDown as ChevronDownIcon, Check as CheckIcon, Plus as PlusIcon, Minus as MinusIcon } from "lucide-react";
-import { collection, addDoc, getDocs, serverTimestamp } from "firebase/firestore";
+import { collection, addDoc, getDocs, serverTimestamp, doc, writeBatch } from "firebase/firestore";
 import { db } from "../../firebase";
 import React, { useEffect, useState } from "react";
 import { Badge } from "../../components/ui/badge";
@@ -39,6 +39,7 @@ export const InventoryModule = () => {
   const [stockOutItems, setStockOutItems] = useState([]); // [{index, name, unit, currentQty, outQty, status}]
   const [isStockOutSummaryOpen, setIsStockOutSummaryOpen] = useState(false);
   const [stockOutSummary, setStockOutSummary] = useState([]); // [{name,before,out,after}]
+  const [editedRows, setEditedRows] = useState({}); // pending inline edits per _id
 
   // Numeric input sanitizers
   const handleQuantityChange = (e) => {
@@ -73,13 +74,91 @@ export const InventoryModule = () => {
 
   const rows = dataMap[activeTab] ?? [];
 
+  // Map Firestore doc to table row
+  const mapDocToRow = (d) => {
+    const data = d.data() || {};
+    const qtyNum = Number(data.quantity || 0);
+    const unit = data.units || data.unit || "units";
+    const status = data.status || (qtyNum <= 20 ? "Critical" : qtyNum <= 60 ? "Low Stock" : "In Stock");
+    const rawExp = data.expiration || data.expiration_date;
+    let expirationStr = "—";
+    if (rawExp) {
+      if (typeof rawExp === 'string') expirationStr = rawExp;
+      else if (typeof rawExp === 'object' && rawExp !== null) {
+        if (typeof rawExp.toDate === 'function') expirationStr = rawExp.toDate().toLocaleDateString('en-US');
+        else if ('seconds' in rawExp) expirationStr = new Date(rawExp.seconds * 1000).toLocaleDateString('en-US');
+      }
+    }
+    return {
+      item: data.item_name || data.name || "",
+      quantity: `${qtyNum} ${unit}`,
+      expiration: expirationStr,
+      supplier: data.supplier || "",
+      unitCost: `₱${Number(data.unit_cost || 0).toFixed(2)}`,
+      status,
+      _id: d.id,
+    };
+  };
+
+  // Per-tab cache helpers to minimize reads
+  const getCacheKey = (tab) => `${tab}_cache_v1`;
+  const TTL_MS = 60 * 1000; // 60s TTL; adjust if needed
+  const tryLoadCache = (tab) => {
+    try {
+      const raw = sessionStorage.getItem(getCacheKey(tab));
+      if (!raw) return null;
+      const { at, rows } = JSON.parse(raw);
+      if (Date.now() - at > TTL_MS) return null;
+      return rows;
+    } catch { return null; }
+  };
+  const saveCache = (tab, rows) => {
+    try { sessionStorage.setItem(getCacheKey(tab), JSON.stringify({ at: Date.now(), rows })); } catch {}
+  };
+  const fetchTabIfNeeded = async (tab) => {
+    const cached = tryLoadCache(tab);
+    if (cached) {
+      setDataMap((prev) => ({ ...prev, [tab]: cached }));
+      return;
+    }
+    const snap = await getDocs(collection(db, tab));
+    const rows = snap.docs.map(mapDocToRow);
+    setDataMap((prev) => ({ ...prev, [tab]: rows }));
+    saveCache(tab, rows);
+  };
+
   // Clear selected rows when tab changes or select mode exits
   useEffect(() => {
     setSelectedRows(new Set());
   }, [activeTab, selectMode]);
   
   // Quick Actions: toggles and inline edit helpers
-  const handleToggleEdit = () => setEditMode((v) => !v);
+  const handleToggleEdit = async () => {
+    if (editMode && Object.keys(editedRows).length) {
+      try {
+        const batch = writeBatch(db);
+        Object.entries(editedRows).forEach(([id, payload]) => batch.update(doc(db, activeTab, id), payload));
+        await batch.commit();
+        setDataMap((prev) => {
+          const list = [...(prev[activeTab] || [])].map((r) => {
+            if (!editedRows[r._id]) return r;
+            const p = editedRows[r._id];
+            const next = { ...r };
+            if (p.item_name !== undefined) next.item = p.item_name;
+            if (p.expiration !== undefined) next.expiration = p.expiration || '—';
+            if (p.unit_cost !== undefined) next.unitCost = `₱${Number(p.unit_cost || 0).toFixed(2)}`;
+            return next;
+          });
+          try { sessionStorage.setItem(getCacheKey(activeTab), JSON.stringify({ at: Date.now(), rows: list })); } catch {}
+          return { ...prev, [activeTab]: list };
+        });
+        setEditedRows({});
+      } catch (e) {
+        console.error('Failed to save edits', e);
+      }
+    }
+    setEditMode((v) => !v);
+  };
   const handleToggleSelect = () => {
     setSelectMode((v) => {
       const next = !v;
@@ -100,10 +179,13 @@ export const InventoryModule = () => {
       const copy = { ...prev };
       const list = [...(copy[activeTab] || [])];
       const r = { ...list[index] };
+      const id = r._id;
       if (field === 'item') {
         r.item = value;
+        setEditedRows((prevEdits) => ({ ...prevEdits, [id]: { ...(prevEdits[id] || {}), item_name: value } }));
       } else if (field === 'expiration') {
         r.expiration = value;
+        setEditedRows((prevEdits) => ({ ...prevEdits, [id]: { ...(prevEdits[id] || {}), expiration: value } }));
       } else if (field === 'unitCost') {
         let v = String(value ?? '').replace(/[^0-9.]/g, '');
         const parts = v.split('.');
@@ -111,6 +193,8 @@ export const InventoryModule = () => {
         const [intPart, decPart] = v.split('.');
         v = decPart !== undefined ? `${intPart}.${decPart.slice(0, 2)}` : intPart;
         r.unitCost = `₱${v}`;
+        const asNum = Number(v || 0);
+        setEditedRows((prevEdits) => ({ ...prevEdits, [id]: { ...(prevEdits[id] || {}), unit_cost: asNum } }));
       }
       list[index] = r;
       copy[activeTab] = list;
@@ -134,64 +218,10 @@ export const InventoryModule = () => {
   })();
 
   const todayStr = new Date().toLocaleDateString("en-US");
-
-  // One-time fetch with small cache TTL to minimize reads
-  useEffect(() => {
-    const CACHE_KEY = 'consumables_cache_v1';
-    const TTL_MS = 60 * 1000; // 60s TTL; adjust if needed
-
-    const tryLoadCache = () => {
-      try {
-        const raw = sessionStorage.getItem(CACHE_KEY);
-        if (!raw) return null;
-        const { at, rows } = JSON.parse(raw);
-        if (Date.now() - at > TTL_MS) return null;
-        return rows;
-      } catch { return null; }
-    };
-
-    const saveCache = (rows) => {
-      try { sessionStorage.setItem(CACHE_KEY, JSON.stringify({ at: Date.now(), rows })); } catch {}
-    };
-
-    const mapDocToRow = (d) => {
-      const data = d.data() || {};
-      const qtyNum = Number(data.quantity || 0);
-      const unit = data.units || data.unit || "units";
-      const status = data.status || (qtyNum <= 20 ? "Critical" : qtyNum <= 60 ? "Low Stock" : "In Stock");
-      const rawExp = data.expiration || data.expiration_date;
-      let expirationStr = "—";
-      if (rawExp) {
-        if (typeof rawExp === 'string') expirationStr = rawExp;
-        else if (typeof rawExp === 'object' && rawExp !== null) {
-          if (typeof rawExp.toDate === 'function') expirationStr = rawExp.toDate().toLocaleDateString('en-US');
-          else if ('seconds' in rawExp) expirationStr = new Date(rawExp.seconds * 1000).toLocaleDateString('en-US');
-        }
-      }
-      return {
-        item: data.item_name || data.name || "",
-        quantity: `${qtyNum} ${unit}`,
-        expiration: expirationStr,
-        supplier: data.supplier || "",
-        unitCost: `₱${Number(data.unit_cost || 0).toFixed(2)}`,
-        status,
-        _id: d.id,
-      };
-    };
-
-    const cached = tryLoadCache();
-    if (cached) {
-      setDataMap((prev) => ({ ...prev, consumables: cached }));
-      return; // skip network fetch to save reads
-    }
-
-    (async () => {
-      const snap = await getDocs(collection(db, 'consumables'));
-      const rows = snap.docs.map(mapDocToRow);
-      setDataMap((prev) => ({ ...prev, consumables: rows }));
-      saveCache(rows);
-    })();
-  }, []);
+  // Initial fetch for default tab
+  useEffect(() => { fetchTabIfNeeded('consumables'); }, []);
+  // Fetch on tab change if needed
+  useEffect(() => { if (activeTab !== 'consumables') fetchTabIfNeeded(activeTab); }, [activeTab]);
 
   const [isSaving, setIsSaving] = useState(false);
 
@@ -208,6 +238,7 @@ export const InventoryModule = () => {
         setIsSaving(false);
         return;
       }
+      const collectionName = activeTab; // write to the current tab collection
       const payload = {
         item_name: itemName,
         quantity: qty,
@@ -220,7 +251,7 @@ export const InventoryModule = () => {
       // Save to ordered (log) and consumables (inventory)
       const [logRef, consRef] = await Promise.all([
         addDoc(collection(db, "ordered"), payload),
-        addDoc(collection(db, "consumables"), { ...payload, status: "In Stock" }),
+        addDoc(collection(db, collectionName), { ...payload, status: "In Stock" }),
       ]);
 
       // Optimistically update UI and cache without refetching
@@ -235,9 +266,9 @@ export const InventoryModule = () => {
         _id: consRef.id,
       };
       setDataMap((prev) => {
-        const rows = [...(prev.consumables || []), newRow];
-        try { sessionStorage.setItem('consumables_cache_v1', JSON.stringify({ at: Date.now(), rows })); } catch {}
-        return { ...prev, consumables: rows };
+        const rows = [...(prev[collectionName] || []), newRow];
+        try { sessionStorage.setItem(getCacheKey(collectionName), JSON.stringify({ at: Date.now(), rows })); } catch {}
+        return { ...prev, [collectionName]: rows };
       });
 
       // reset form
@@ -280,7 +311,8 @@ export const InventoryModule = () => {
     setRestockItems((prev) => prev.map((it) => it.index === idx ? { ...it, addQty: Math.max(0, (it.addQty || 0) + delta) } : it));
   };
 
-  const confirmRestock = () => {
+  const confirmRestock = async () => {
+    let updatedList;
     setDataMap((prev) => {
       const copy = { ...prev };
       const list = [...(copy[activeTab] || [])];
@@ -289,11 +321,25 @@ export const InventoryModule = () => {
         const r = { ...list[index] };
         const newQty = Math.max(0, (currentQty || 0) + addQty);
         r.quantity = `${newQty} ${unit}`;
+        r.status = newQty <= 20 ? 'Critical' : newQty <= 60 ? 'Low Stock' : 'In Stock';
         list[index] = r;
       });
       copy[activeTab] = list;
+      updatedList = list;
       return copy;
     });
+    try {
+      const batch = writeBatch(db);
+      restockItems.forEach(({ index, currentQty, addQty }) => {
+        if (!addQty) return;
+        const row = rows[index];
+        const newQty = Math.max(0, (currentQty || 0) + addQty);
+        const status = newQty <= 20 ? 'Critical' : newQty <= 60 ? 'Low Stock' : 'In Stock';
+        batch.update(doc(db, activeTab, row._id), { quantity: newQty, status });
+      });
+      await batch.commit();
+      try { sessionStorage.setItem(getCacheKey(activeTab), JSON.stringify({ at: Date.now(), rows: updatedList })); } catch {}
+    } catch (e) { console.error('Failed to persist restock', e); }
     setIsRestockOpen(false);
     setSelectMode(false);
     setSelectedRows(new Set());
@@ -318,24 +364,54 @@ export const InventoryModule = () => {
     setStockOutItems((prev) => prev.map((it) => it.index === idx ? { ...it, outQty: Math.max(0, (it.outQty || 0) + delta) } : it));
   };
 
-  const confirmStockOut = () => {
+  const confirmStockOut = async () => {
     // Precompute summary to avoid side effects inside state updaters (prevents duplicates in StrictMode)
     const summary = stockOutItems.map(({ index, name, currentQty, outQty, unit }) => {
       const after = Math.max(0, (currentQty || 0) - (outQty || 0));
       return { index, name, before: currentQty, out: outQty, after, unit };
     });
 
+    let updatedList;
     setDataMap((prev) => {
       const copy = { ...prev };
       const list = [...(copy[activeTab] || [])];
       summary.forEach(({ index, after, unit }) => {
         const r = { ...list[index] };
         r.quantity = `${after} ${unit}`;
+        r.status = after <= 20 ? 'Critical' : after <= 60 ? 'Low Stock' : 'In Stock';
         list[index] = r;
       });
       copy[activeTab] = list;
+      updatedList = list;
       return copy;
     });
+
+    try {
+      const batch = writeBatch(db);
+      summary.forEach(({ index, after }) => {
+        const row = rows[index];
+        const status = after <= 20 ? 'Critical' : after <= 60 ? 'Low Stock' : 'In Stock';
+        batch.update(doc(db, activeTab, row._id), { quantity: after, status });
+      });
+      await batch.commit();
+      try { sessionStorage.setItem(getCacheKey(activeTab), JSON.stringify({ at: Date.now(), rows: updatedList })); } catch {}
+      // Log stock-out events for dashboard usage trend
+      const logs = summary.filter(s => (s.out || 0) > 0).map((s) => ({
+        category: activeTab,
+        item_name: s.name,
+        quantity: Number(s.out || 0),
+        unit: s.unit,
+        type: 'stock_out',
+        timestamp: serverTimestamp(),
+      }));
+      if (logs.length) {
+        try {
+          await Promise.all(logs.map((payload) => addDoc(collection(db, 'stock_logs'), payload)));
+        } catch (e) {
+          console.warn('Failed to write some stock logs', e);
+        }
+      }
+    } catch (e) { console.error('Failed to persist stock out', e); }
 
     setIsStockOutOpen(false);
     setSelectMode(false);
@@ -519,10 +595,7 @@ export const InventoryModule = () => {
                             onChange={(e) => handleInlineChange(index, 'item', e.target.value)}
                           />
                         ) : (
-                          <>
-                            <div className="[font-family:'Inter',Helvetica] font-medium text-gray-900">{item.item}</div>
-                            <div className="[font-family:'Oxygen',Helvetica] text-sm text-gray-500">3 min</div>
-                          </>
+                          <div className="[font-family:'Inter',Helvetica] font-medium text-gray-900">{item.item}</div>
                         )}
                       </td>
                       <td className="px-6 py-4 [font-family:'Inter',Helvetica] text-gray-900">{item.quantity}</td>

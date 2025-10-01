@@ -2,8 +2,11 @@ import React from "react";
 import { Bell as BellIcon, Search as SearchIcon } from "lucide-react";
 import { Input } from "../ui/input";
 import { Badge } from "../ui/badge";
+import { useLastName } from "../../hooks/useLastName";
+import profilePng from "../../assets/Ellipse 1.png";
 
 export const AppHeader = ({ title, subtitle, searchPlaceholder = "Search inventory" }) => {
+  const lastName = useLastName();
   return (
     <header className="bg-white shadow-sm px-8 py-6 flex items-center justify-between border-b border-gray-200">
       <div>
@@ -34,10 +37,10 @@ export const AppHeader = ({ title, subtitle, searchPlaceholder = "Search invento
         </div>
 
         <div className="flex items-center gap-3 pl-4 border-l border-gray-200">
-          <img className="w-10 h-10 rounded-full border-2 border-gray-200" alt="Profile" src="/group.png" />
+          <img className="w-10 h-10 rounded-full border-2 border-gray-200 object-cover" alt="Profile" src={profilePng} />
           <div>
             <div className="[font-family:'Inter',Helvetica] font-semibold text-gray-900 text-sm tracking-[0] leading-[normal]">
-              Dr. Giselle
+              {lastName ? `Dr. ${lastName}` : 'Dr. Giselle'}
             </div>
             <div className="[font-family:'Oxygen',Helvetica] font-normal text-gray-500 text-xs tracking-[0] leading-[normal]">
               ADMINISTRATOR
