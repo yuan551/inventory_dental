@@ -1,5 +1,6 @@
 import React from "react";
 import { Card, CardContent } from "../../../../components/ui/card";
+import lowStockIcon from "../../../../assets/dashboard/low stock icon.png"; // import PNG so Vite bundles it
 
 export const LowStockItemsSection = ({ count = 0 }) => {
   return (
@@ -17,9 +18,15 @@ export const LowStockItemsSection = ({ count = 0 }) => {
               Total low stock items
             </div>
           </div>
+
+          {/* Icon container */}
           <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center">
-            <div className="w-6 h-6 bg-red-500 rounded-full flex items-center justify-center">
-              <span className="text-white text-xs">⚠</span>
+            <div className="w-6 h-6 rounded-full flex items-center justify-center">
+              <img
+                src={lowStockIcon}
+                alt="Low stock"
+                className="w-5 h-5 object-contain"
+              />
             </div>
           </div>
         </div>

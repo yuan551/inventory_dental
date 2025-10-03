@@ -1,5 +1,6 @@
 import React from "react";
 import { Card, CardContent } from "../../../../components/ui/card";
+import inventoryValueIcon from "../../../../assets/dashboard/inventory value.png"; // use PNG icon
 
 export const InventoryOverviewSection = ({ totalValue = 0 }) => {
   const formatted = new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP', maximumFractionDigits: 0 }).format(totalValue || 0);
@@ -19,8 +20,8 @@ export const InventoryOverviewSection = ({ totalValue = 0 }) => {
             </div>
           </div>
           <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
-            <div className="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center">
-              <span className="text-white text-xs">📈</span>
+            <div className="w-6 h-6 rounded-full flex items-center justify-center">
+              <img src={inventoryValueIcon} alt="Inventory value" className="w-5 h-5 object-contain" />
             </div>
           </div>
         </div>

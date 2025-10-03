@@ -1,5 +1,6 @@
 import React from "react";
 import { Card, CardContent } from "../../../../components/ui/card";
+import pendingIcon from "../../../../assets/dashboard/pending orders icon.png"; // use PNG icon for consistency
 
 export const PendingOrdersSection = ({ count = 0 }) => {
   return (
@@ -18,8 +19,8 @@ export const PendingOrdersSection = ({ count = 0 }) => {
             </div>
           </div>
           <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center">
-            <div className="w-6 h-6 bg-gray-500 rounded-full flex items-center justify-center">
-              <span className="text-white text-xs">📋</span>
+            <div className="w-6 h-6 rounded-full flex items-center justify-center">
+              <img src={pendingIcon} alt="Pending orders" className="w-5 h-5 object-contain" />
             </div>
           </div>
         </div>

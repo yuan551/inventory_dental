@@ -29,3 +29,9 @@ If you are satisfied with the result, you can finally build the project for rele
 ```
 npm run build
 ```
+
+## Firebase configuration
+
+Firebase Auth and Firestore are initialized in `src/firebase.js`.
+
+Currently, the Firebase config is hardcoded (by request). If you later want to hide credentials, switch to a Vite `.env` approach with `VITE_`-prefixed keys and keep `.env` out of git.
