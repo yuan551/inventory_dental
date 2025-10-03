@@ -1,5 +1,6 @@
 import React from "react";
 import { Card, CardContent } from "../../../../components/ui/card";
+import expiringIcon from "../../../../assets/dashboard/expiring soon icon.png"; // import PNG so Vite bundles it
 
 export const StockAlertsSection = ({ count = 0 }) => {
   return (
@@ -18,8 +19,8 @@ export const StockAlertsSection = ({ count = 0 }) => {
             </div>
           </div>
           <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-            <div className="w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center">
-              <span className="text-white text-xs">📅</span>
+            <div className="w-6 h-6 rounded-full flex items-center justify-center">
+              <img src={expiringIcon} alt="Expiring soon" className="w-5 h-5 object-contain" />
             </div>
           </div>
         </div>

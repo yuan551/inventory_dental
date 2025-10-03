@@ -1,5 +1,5 @@
-import { Bell as BellIcon, Search as SearchIcon, Filter as FilterIcon, Package as PackageIcon, X as XIcon, Calendar as CalendarIcon, ChevronDown as ChevronDownIcon, Check as CheckIcon, Plus as PlusIcon, Minus as MinusIcon } from "lucide-react";
-import { collection, addDoc, getDocs, serverTimestamp, doc, writeBatch } from "firebase/firestore";
+import { Bell as BellIcon, Search as SearchIcon, Filter as FilterIcon, Package as PackageIcon, X as XIcon, Calendar as CalendarIcon, ChevronDown as ChevronDownIcon, Check as CheckIcon, Plus as PlusIcon, Minus as MinusIcon, Pencil as PencilIcon, Trash as TrashIcon } from "lucide-react";
+import { collection, addDoc, getDocs, serverTimestamp, doc, writeBatch, updateDoc, deleteDoc, increment } from "firebase/firestore";
 import { db } from "../../firebase";
 import React, { useEffect, useState } from "react";
 import { Badge } from "../../components/ui/badge";
@@ -7,6 +7,7 @@ import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { DashboardSidebarSection } from "../DashboardModule/sections/DashboardSidebarSection/DashboardSidebarSection";
 import { AppHeader } from "../../components/layout/AppHeader";
+import menuIcon from "../../assets/icon.png";
 
 export const InventoryModule = () => {
   // Sidebar collapse state for consistent width across pages
@@ -41,6 +42,18 @@ export const InventoryModule = () => {
   const [stockOutSummary, setStockOutSummary] = useState([]); // [{name,before,out,after}]
   const [editedRows, setEditedRows] = useState({}); // pending inline edits per _id
 
+  // Notes modal state
+  const [isNotesOpen, setIsNotesOpen] = useState(false);
+  const [notesLoading, setNotesLoading] = useState(false);
+  const [notesItem, setNotesItem] = useState(null); // { id, item, category }
+  const [notesList, setNotesList] = useState([]); // [{text, created_at}]
+  const [newNote, setNewNote] = useState("");
+  const [editingNoteId, setEditingNoteId] = useState(null);
+  const [editText, setEditText] = useState("");
+  const [isDeleteNoteOpen, setIsDeleteNoteOpen] = useState(false);
+  const [noteToDelete, setNoteToDelete] = useState(null);
+  const [isDeletingNote, setIsDeletingNote] = useState(false);
+
   // Numeric input sanitizers
   const handleQuantityChange = (e) => {
     const digitsOnly = e.target.value.replace(/[^0-9]/g, "");
@@ -71,8 +84,22 @@ export const InventoryModule = () => {
     "Low Stock": "bg-yellow-100 text-yellow-800",
     "In Stock": "bg-green-100 text-green-800",
   };
+  // Status filter dropdown state
+  const [statusOpen, setStatusOpen] = useState(false);
+  const [statusFilter, setStatusFilter] = useState('All Status');
+  const statusOptions = ['All Status', 'In Stock', 'Low Stock', 'Critical'];
+  const statusDotClass = {
+    'All Status': 'bg-gray-300',
+    'In Stock': 'bg-green-500',
+    'Low Stock': 'bg-yellow-500',
+    'Critical': 'bg-red-500',
+  };
 
-  const rows = dataMap[activeTab] ?? [];
+  const baseRows = dataMap[activeTab] ?? [];
+  // Map to keep original index for actions
+  const displayRows = baseRows
+    .map((r, i) => ({ ...r, _sourceIndex: i }))
+    .filter((r) => (statusFilter === 'All Status' ? true : r.status === statusFilter));
 
   // Map Firestore doc to table row
   const mapDocToRow = (d) => {
@@ -96,6 +123,7 @@ export const InventoryModule = () => {
       supplier: data.supplier || "",
       unitCost: `₱${Number(data.unit_cost || 0).toFixed(2)}`,
       status,
+      notesCount: Number(data.notes_count || 0),
       _id: d.id,
     };
   };
@@ -202,8 +230,139 @@ export const InventoryModule = () => {
     });
   };
 
+  // Notes helpers
+  const openNotes = async (index) => {
+    try {
+      const row = baseRows[index];
+      if (!row) return;
+      const ctx = { id: row._id, item: row.item, category: activeTab };
+      setNotesItem(ctx);
+      setIsNotesOpen(true);
+      setNotesLoading(true);
+      setEditingNoteId(null);
+      setEditText("");
+      // fetch notes subcollection
+      const snap = await getDocs(collection(db, activeTab, row._id, 'notes'));
+      const list = snap.docs.map((d) => {
+        const data = d.data() || {};
+        let when = data.created_at;
+        let ts = null;
+        if (when) {
+          if (typeof when.toDate === 'function') ts = when.toDate();
+          else if (when.seconds) ts = new Date(when.seconds * 1000);
+          else ts = new Date(when);
+        }
+        return { id: d.id, text: data.text || '', created_at: ts };
+      }).sort((a,b) => (b.created_at?.getTime?.()||0) - (a.created_at?.getTime?.()||0));
+      setNotesList(list);
+    } catch (e) {
+      console.error('Failed to load notes', e);
+      setNotesList([]);
+    } finally {
+      setNotesLoading(false);
+    }
+  };
+
+  const addNoteNow = async () => {
+    const text = (newNote || '').trim();
+    if (!text || !notesItem?.id) return;
+    try {
+      const ref = await addDoc(collection(db, notesItem.category, notesItem.id, 'notes'), {
+        text,
+        created_at: serverTimestamp(),
+      });
+      // Optimistic: prepend with local timestamp for now; it will match server shortly
+      const local = { id: ref.id, text, created_at: new Date() };
+      setNotesList((prev) => [local, ...prev]);
+      setNewNote("");
+      // Increment parent notes_count in Firestore and locally
+      try {
+        await updateDoc(doc(db, notesItem.category, notesItem.id), { notes_count: increment(1) });
+      } catch {}
+      setDataMap((prev) => {
+        const copy = { ...prev };
+        const list = [...(copy[notesItem.category] || [])];
+        const idx = list.findIndex((r) => r._id === notesItem.id);
+        if (idx >= 0) {
+          const curr = list[idx];
+          list[idx] = { ...curr, notesCount: Math.max(0, (curr.notesCount || 0) + 1) };
+          copy[notesItem.category] = list;
+          try { sessionStorage.setItem(getCacheKey(notesItem.category), JSON.stringify({ at: Date.now(), rows: list })); } catch {}
+        }
+        return copy;
+      });
+    } catch (e) {
+      console.error('Failed to add note', e);
+    }
+  };
+
+  // Notes edit/delete helpers
+  const beginEditNote = (note) => {
+    setEditingNoteId(note.id);
+    setEditText(note.text || "");
+  };
+
+  const cancelEditNote = () => {
+    setEditingNoteId(null);
+    setEditText("");
+  };
+
+  const saveEditNote = async () => {
+    if (!editingNoteId || !notesItem?.id) return;
+    const text = (editText || '').trim();
+    if (!text) return;
+    try {
+      await updateDoc(doc(db, notesItem.category, notesItem.id, 'notes', editingNoteId), {
+        text,
+        updated_at: serverTimestamp(),
+      });
+      setNotesList((prev) => prev.map((n) => (n.id === editingNoteId ? { ...n, text } : n)));
+      setEditingNoteId(null);
+      setEditText("");
+    } catch (e) {
+      console.error('Failed to save note edit', e);
+    }
+  };
+
+  const askDeleteNote = (noteId) => {
+    setNoteToDelete(noteId);
+    setIsDeleteNoteOpen(true);
+  };
+
+  const deleteNoteNow = async (noteId) => {
+    if (!noteId || !notesItem?.id) return;
+    try {
+      setIsDeletingNote(true);
+      await deleteDoc(doc(db, notesItem.category, notesItem.id, 'notes', noteId));
+      setNotesList((prev) => prev.filter((n) => n.id !== noteId));
+      // Decrement parent notes_count in Firestore and locally
+      try {
+        await updateDoc(doc(db, notesItem.category, notesItem.id), { notes_count: increment(-1) });
+      } catch {}
+      setDataMap((prev) => {
+        const copy = { ...prev };
+        const list = [...(copy[notesItem.category] || [])];
+        const idx = list.findIndex((r) => r._id === notesItem.id);
+        if (idx >= 0) {
+          const curr = list[idx];
+          const nextCount = Math.max(0, (curr.notesCount || 0) - 1);
+          list[idx] = { ...curr, notesCount: nextCount };
+          copy[notesItem.category] = list;
+          try { sessionStorage.setItem(getCacheKey(notesItem.category), JSON.stringify({ at: Date.now(), rows: list })); } catch {}
+        }
+        return copy;
+      });
+      setIsDeleteNoteOpen(false);
+      setNoteToDelete(null);
+    } catch (e) {
+      console.error('Failed to delete note', e);
+    } finally {
+      setIsDeletingNote(false);
+    }
+  };
+
   const legendItems = (() => {
-    const counts = rows.reduce(
+    const counts = baseRows.reduce(
       (acc, r) => {
         acc[r.status] = (acc[r.status] || 0) + 1;
         return acc;
@@ -251,7 +410,7 @@ export const InventoryModule = () => {
       // Save to ordered (log) and consumables (inventory)
       const [logRef, consRef] = await Promise.all([
         addDoc(collection(db, "ordered"), payload),
-        addDoc(collection(db, collectionName), { ...payload, status: "In Stock" }),
+        addDoc(collection(db, collectionName), { ...payload, status: "In Stock", notes_count: 0 }),
       ]);
 
       // Optimistically update UI and cache without refetching
@@ -263,6 +422,7 @@ export const InventoryModule = () => {
         supplier: supplierValue,
         unitCost: `₱${cost.toFixed(2)}`,
         status,
+        notesCount: 0,
         _id: consRef.id,
       };
       setDataMap((prev) => {
@@ -297,7 +457,7 @@ export const InventoryModule = () => {
   const openRestock = () => {
     if (!selectMode || selectedRows.size === 0) return;
     const list = Array.from(selectedRows).sort((a,b)=>a-b).map((idx) => {
-      const r = rows[idx];
+      const r = baseRows[idx];
       const m = /^\s*(\d+)\s*(.*)$/.exec(r.quantity || "0 units");
       const current = m ? parseInt(m[1], 10) : 0;
       const unit = m ? (m[2] || "units").trim() : "units";
@@ -332,7 +492,7 @@ export const InventoryModule = () => {
       const batch = writeBatch(db);
       restockItems.forEach(({ index, currentQty, addQty }) => {
         if (!addQty) return;
-        const row = rows[index];
+        const row = baseRows[index];
         const newQty = Math.max(0, (currentQty || 0) + addQty);
         const status = newQty <= 20 ? 'Critical' : newQty <= 60 ? 'Low Stock' : 'In Stock';
         batch.update(doc(db, activeTab, row._id), { quantity: newQty, status });
@@ -350,7 +510,7 @@ export const InventoryModule = () => {
   const openStockOut = () => {
     if (!selectMode || selectedRows.size === 0) return;
     const list = Array.from(selectedRows).sort((a,b)=>a-b).map((idx) => {
-      const r = rows[idx];
+      const r = baseRows[idx];
       const m = /^\s*(\d+)\s*(.*)$/.exec(r.quantity || "0 units");
       const current = m ? parseInt(m[1], 10) : 0;
       const unit = m ? (m[2] || "units").trim() : "units";
@@ -389,7 +549,7 @@ export const InventoryModule = () => {
     try {
       const batch = writeBatch(db);
       summary.forEach(({ index, after }) => {
-        const row = rows[index];
+        const row = baseRows[index];
         const status = after <= 20 ? 'Critical' : after <= 60 ? 'Low Stock' : 'In Stock';
         batch.update(doc(db, activeTab, row._id), { quantity: after, status });
       });
@@ -495,12 +655,39 @@ export const InventoryModule = () => {
         {/* Header */}
         <AppHeader title="INVENTORY" subtitle="Manage your dental supplies and item inventory" />
 
-        {/* Action Buttons */}
-        <div className="px-8 py-4 flex justify-end gap-4 relative">
-          <Button className="px-8 py-3 bg-[#00b7c2] hover:bg-[#009ba5] text-white rounded-full [font-family:'Oxygen',Helvetica] font-semibold text-lg shadow-lg">
-            <FilterIcon className="w-4 h-4 mr-2" />
-            All Status
-          </Button>
+          {/* Action Buttons */}
+          <div className="px-8 py-4 flex justify-end gap-4 relative">
+          <div className="relative">
+            <Button onClick={() => setStatusOpen((v) => !v)} className="px-8 py-3 bg-[#00b7c2] hover:bg-[#009ba5] text-white rounded-full [font-family:'Oxygen',Helvetica] font-semibold text-lg shadow-lg">
+              <FilterIcon className="w-4 h-4 mr-2" />
+              {statusFilter}
+              <ChevronDownIcon className={`ml-2 w-4 h-4 transition-transform ${statusOpen ? 'rotate-180' : ''}`} />
+            </Button>
+            <div className={`${statusOpen ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-95 -translate-y-1 pointer-events-none'} absolute right-0 mt-2 w-56 bg-white rounded-2xl border border-gray-100 shadow-[0_12px_40px_rgba(0,0,0,0.18)] transition-all duration-150 origin-top-right`}
+                 onMouseLeave={() => setStatusOpen(false)}>
+              {/* Arrow */}
+              <div className="absolute -top-1.5 right-6 w-3 h-3 bg-white border-t border-l border-gray-100 rotate-45" />
+              <div className="py-2">
+                {statusOptions.map((opt) => (
+                  <button
+                    key={opt}
+                    onClick={() => {
+                      setStatusFilter(opt);
+                      setStatusOpen(false);
+                      // reset selection to avoid index mismatches
+                      setSelectMode(false);
+                      setSelectedRows(new Set());
+                    }}
+                    className={`w-full px-3.5 py-2.5 flex items-center gap-3 text-[14px] transition-colors ${statusFilter === opt ? 'bg-[#E6F7F9]' : 'hover:bg-gray-50'}`}
+                  >
+                    <span className={`w-2.5 h-2.5 rounded-full ${statusDotClass[opt] || 'bg-gray-300'}`} />
+                    <span className={`flex-1 text-left ${statusFilter === opt ? 'text-[#00b7c2] font-medium' : 'text-gray-800'}`}>{opt}</span>
+                    {statusFilter === opt && <CheckIcon className="w-4 h-4 text-[#00b7c2]" />}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
           <div className="relative">
             <Button onClick={() => setQaOpen((v) => !v)} className="px-8 py-3 bg-[#00b7c2] hover:bg-[#009ba5] text-white rounded-full [font-family:'Oxygen',Helvetica] font-semibold text-lg shadow-lg">
               Quick Actions
@@ -553,7 +740,7 @@ export const InventoryModule = () => {
             {/* Overview Header */}
             <div className="flex items-center justify-between mb-6">
               <h2 className="[font-family:'Inter',Helvetica] font-semibold text-xl text-gray-900">
-                OVERVIEW ({rows.length} {rows.length === 1 ? 'item' : 'items'})
+                OVERVIEW ({displayRows.length} {displayRows.length === 1 ? 'item' : 'items'})
               </h2>
             </div>
 
@@ -575,15 +762,15 @@ export const InventoryModule = () => {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {rows.map((item, index) => (
-                    <tr key={index} className={`transition-colors ${index === 0 ? 'bg-[#E6F7F9]' : 'hover:bg-gray-50'}`}>
+                  {displayRows.map((item, index) => (
+                    <tr key={item._sourceIndex} className={`transition-colors ${index === 0 ? 'bg-[#E6F7F9]' : 'hover:bg-gray-50'}`}>
                       {selectMode && (
                         <td className="px-4 py-4 align-middle">
                           <input
                             type="checkbox"
                             className="w-4 h-4 rounded border-gray-300 text-[#00b7c2] focus:ring-[#00b7c2]"
-                            checked={selectedRows.has(index)}
-                            onChange={() => toggleRowSelected(index)}
+                            checked={selectedRows.has(item._sourceIndex)}
+                            onChange={() => toggleRowSelected(item._sourceIndex)}
                           />
                         </td>
                       )}
@@ -592,7 +779,7 @@ export const InventoryModule = () => {
                           <Input
                             className="h-9 rounded-full max-w-xs"
                             value={item.item}
-                            onChange={(e) => handleInlineChange(index, 'item', e.target.value)}
+                            onChange={(e) => handleInlineChange(item._sourceIndex, 'item', e.target.value)}
                           />
                         ) : (
                           <div className="[font-family:'Inter',Helvetica] font-medium text-gray-900">{item.item}</div>
@@ -604,7 +791,7 @@ export const InventoryModule = () => {
                           <Input
                             className="h-9 rounded-full w-40"
                             value={item.expiration}
-                            onChange={(e) => handleInlineChange(index, 'expiration', e.target.value)}
+                            onChange={(e) => handleInlineChange(item._sourceIndex, 'expiration', e.target.value)}
                           />
                         ) : (
                           item.expiration
@@ -618,7 +805,7 @@ export const InventoryModule = () => {
                             <Input
                               className="h-9 pl-7 rounded-full w-28"
                               value={item.unitCost.replace('₱','')}
-                              onChange={(e) => handleInlineChange(index, 'unitCost', e.target.value)}
+                              onChange={(e) => handleInlineChange(item._sourceIndex, 'unitCost', e.target.value)}
                               inputMode="decimal"
                             />
                           </div>
@@ -632,11 +819,16 @@ export const InventoryModule = () => {
                         </Badge>
                       </td>
                       <td className="px-6 py-4">
-                        <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
-                          <svg className="w-4 h-4 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
-                            <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
-                          </svg>
-                        </button>
+                        <div className="relative inline-block">
+                          <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors" aria-label="Row notes" onClick={() => openNotes(item._sourceIndex)}>
+                            <img src={menuIcon} alt="Actions" className="w-4 h-4 object-contain" />
+                          </button>
+                          {Number(item.notesCount || 0) > 0 && (
+                            <span className="absolute -top-1 -right-1 min-w-[16px] h-[16px] px-[3px] rounded-full bg-[#00b7c2] text-white text-[10px] leading-[16px] text-center border border-white">
+                              {item.notesCount}
+                            </span>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -964,6 +1156,140 @@ export const InventoryModule = () => {
             <div className="mt-6 flex items-center justify-center">
               <Button onClick={confirmStockOut} className="px-8 py-2 rounded-full bg-[#00b7c2] hover:bg-[#009ba5] text-white shadow-lg">
                 Stock out
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Notes Modal */}
+      <div className={`${isNotesOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'} fixed inset-0 z-[70] flex items-center justify-center transition-opacity duration-200`}
+           onClick={() => setIsNotesOpen(false)}>
+        <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" />
+        <div
+          className={`relative z-10 w-[560px] max-w-[92vw] bg-white rounded-2xl border border-gray-200 shadow-[0_25px_60px_rgba(0,0,0,0.25)] transition-all duration-200 transform ${isNotesOpen ? 'scale-100 translate-y-0' : 'scale-95 translate-y-2'}`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Header */}
+          <div className="rounded-t-2xl bg-[#00b7c2] text-white px-5 py-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-full bg-white/15 flex items-center justify-center">
+                <PackageIcon className="w-5 h-5" />
+              </div>
+              <div className="text-lg font-semibold">Notes{notesItem?.item ? ` • ${notesItem.item}` : ''}</div>
+            </div>
+            <button onClick={() => setIsNotesOpen(false)} className="p-1 rounded-full hover:bg-white/10 transition-colors">
+              <XIcon className="w-5 h-5" />
+            </button>
+          </div>
+
+          {/* Body */}
+          <div className="px-6 pt-5 pb-6">
+            <div className="mb-4">
+              <label className="block text-sm text-gray-600 mb-1">Add Note</label>
+              <div className="flex items-start gap-2">
+                <textarea
+                  className="flex-1 rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#00b7c2]/20 focus:border-[#00b7c2] min-h-[70px]"
+                  placeholder="Write a quick note…"
+                  value={newNote}
+                  onChange={(e) => setNewNote(e.target.value)}
+                />
+                <Button onClick={addNoteNow} className="h-10 px-4 rounded-full bg-[#00b7c2] hover:bg-[#009ba5] text-white whitespace-nowrap">Add</Button>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-gray-200 overflow-hidden">
+              <div className="bg-gray-50 text-gray-700 text-sm [font-family:'Inter',Helvetica] px-4 py-3">Notes</div>
+              <div className="divide-y divide-gray-200 max-h-64 overflow-auto">
+                {notesLoading ? (
+                  <div className="px-4 py-3 text-sm text-gray-500">Loading…</div>
+                ) : notesList.length === 0 ? (
+                  <div className="px-4 py-3 text-sm text-gray-500">No notes yet.</div>
+                ) : (
+                  notesList.map((n) => (
+                    <div key={n.id} className="px-4 py-3">
+                      {editingNoteId === n.id ? (
+                        <div>
+                          <textarea
+                            className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#00b7c2]/20 focus:border-[#00b7c2] min-h-[60px]"
+                            value={editText}
+                            onChange={(e) => setEditText(e.target.value)}
+                          />
+                          <div className="mt-2 flex items-center gap-2">
+                            <Button onClick={saveEditNote} className="h-8 px-3 rounded-full bg-[#00b7c2] hover:bg-[#009ba5] text-white text-sm">Save</Button>
+                            <Button onClick={cancelEditNote} className="h-8 px-3 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm">Cancel</Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="[font-family:'Inter',Helvetica] text-gray-900 text-sm">{n.text}</div>
+                            {n.created_at && (
+                              <div className="[font-family:'Oxygen',Helvetica] text-xs text-gray-500 mt-1">{n.created_at.toLocaleString('en-US')}</div>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              className="p-1 rounded hover:bg-gray-100 text-gray-600"
+                              title="Edit"
+                              onClick={() => beginEditNote(n)}
+                            >
+                              <PencilIcon className="w-4 h-4" />
+                            </button>
+                            <button
+                              className="p-1 rounded hover:bg-red-50 text-red-600"
+                              title="Delete"
+                              onClick={() => askDeleteNote(n.id)}
+                            >
+                              <TrashIcon className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Delete Note Confirm Modal */}
+      <div className={`${isDeleteNoteOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'} fixed inset-0 z-[80] flex items-center justify-center transition-opacity duration-200`}
+           onClick={() => { if (!isDeletingNote) { setIsDeleteNoteOpen(false); setNoteToDelete(null); } }}>
+        <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" />
+        <div
+          className={`relative z-10 w-[420px] max-w-[92vw] bg-white rounded-2xl border border-gray-200 shadow-[0_20px_50px_rgba(0,0,0,0.25)] transition-all duration-200 transform ${isDeleteNoteOpen ? 'scale-100 translate-y-0' : 'scale-95 translate-y-2'}`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            className="absolute right-3 top-3 p-1 rounded-full hover:bg-gray-100"
+            onClick={() => { if (!isDeletingNote) { setIsDeleteNoteOpen(false); setNoteToDelete(null); } }}
+            aria-label="Close"
+          >
+            <XIcon className="w-5 h-5 text-gray-500" />
+          </button>
+          <div className="px-6 pt-6 pb-5 text-center">
+            <div className="w-12 h-12 mx-auto rounded-full bg-red-500/10 flex items-center justify-center shadow-sm">
+              <TrashIcon className="w-6 h-6 text-red-600" />
+            </div>
+            <h3 className="mt-4 [font-family:'Inter',Helvetica] font-semibold text-gray-900 text-lg">Delete this note?</h3>
+            <p className="mt-1 [font-family:'Oxygen',Helvetica] text-gray-500 text-sm">This action cannot be undone.</p>
+            <div className="mt-5 flex items-center justify-center gap-3">
+              <Button
+                onClick={() => { if (!isDeletingNote) { setIsDeleteNoteOpen(false); setNoteToDelete(null); } }}
+                className="px-5 py-2 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700"
+                disabled={isDeletingNote}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={async () => { if (noteToDelete) await deleteNoteNow(noteToDelete); }}
+                className={`px-5 py-2 rounded-full ${isDeletingNote ? 'bg-red-400' : 'bg-red-500 hover:bg-red-600'} text-white`}
+                disabled={isDeletingNote}
+              >
+                {isDeletingNote ? 'Deleting…' : 'Delete'}
               </Button>
             </div>
           </div>

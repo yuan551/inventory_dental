@@ -1,4 +1,5 @@
 import React from "react";
+import lowStockIcon from "../../../../assets/dashboard/low stock icon.png"; // use PNG icon
 
 export const StockAlertsListSection = ({ alerts = [] }) => {
   const stockAlerts = alerts.slice(0, 10); // show top 10
@@ -6,7 +7,7 @@ export const StockAlertsListSection = ({ alerts = [] }) => {
     <div className="p-8 bg-white rounded-xl shadow-lg hover:shadow-xl transition-shadow border border-gray-100">
       <div className="flex items-center space-x-2 mb-6">
         <div className="w-6 h-6 bg-red-100 rounded flex items-center justify-center">
-          <span className="text-red-500 text-sm">⚠</span>
+          <img src={lowStockIcon} alt="Low stock" className="w-3.5 h-3.5 object-contain" />
         </div>
         <h2 className="[font-family:'Oxygen',Helvetica] font-bold text-black text-2xl tracking-[0] leading-[normal]">
           Stock Alerts

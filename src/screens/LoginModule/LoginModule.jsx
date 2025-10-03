@@ -38,9 +38,20 @@ export const LoginModule = () => {
       await signInWithEmailAndPassword(auth, formData.email, formData.password);
       console.log("User logged in successfully!");
       navigate("/dashboard");
-    } catch (error) {
-      console.error("Login error:", error);
-      setError("Invalid email or password");
+    } catch (err) {
+      // Log precise code/message to help diagnose config vs credential issues
+      console.error("Login error:", { code: err?.code, message: err?.message });
+      const code = err?.code || "";
+      let msg = "Login failed. Please try again.";
+      if (code === "auth/invalid-credential" || code === "auth/wrong-password") msg = "Incorrect email or password.";
+      else if (code === "auth/user-not-found") msg = "No user found with this email.";
+      else if (code === "auth/too-many-requests") msg = "Too many attempts. Please try again later or reset your password.";
+      else if (code === "auth/network-request-failed") msg = "Network error. Check your internet connection.";
+      else if (code === "auth/operation-not-allowed") msg = "Email/Password sign-in is disabled for this project. Enable it in Firebase Authentication settings.";
+      else if (code === "auth/invalid-api-key" || code === "auth/invalid-project-id" || code === "auth/configuration-not-found") {
+        msg = "App configuration seems invalid. Verify your .env Firebase values and restart the app.";
+      }
+      setError(msg);
     } finally {
       setLoading(false);
     }

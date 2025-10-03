@@ -2,7 +2,7 @@ import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
-// Your web app's Firebase configuration
+// Your web app's Firebase configuration (hardcoded)
 const firebaseConfig = {
   apiKey: "AIzaSyBkgP19hsgeLqXUQOA0-iMZnLNfG5Ay6M0",
   authDomain: "inventory-fab7a.firebaseapp.com",
@@ -13,10 +13,9 @@ const firebaseConfig = {
   measurementId: "G-W5E0FQ5PCL"
 };
 
-
+// Initialize Firebase
 console.log("Firebase config loaded:", firebaseConfig);
 
-// Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
 // Initialize Firebase Authentication and get a reference to the service
