@@ -15,10 +15,13 @@
     "class-variance-authority": "^0.7.0",
     "clsx": "2.1.1",
     "firebase": "^12.3.0",
+    "jspdf": "^2.5.2",
+    "jspdf-autotable": "^3.8.4",
     "lucide-react": "^0.453.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.8.1",
+    "recharts": "^3.2.1",
     "tailwind-merge": "2.5.4",
     "tailwindcss-animate": "1.0.7"
   },

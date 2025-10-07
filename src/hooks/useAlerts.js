@@ -1,16 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
 import { collection, onSnapshot } from 'firebase/firestore';
+import { isPlaceholderDoc } from '../lib/placeholders';
 import { db } from '../firebase';
 
 // Aggregates alerts (low stock and expiring soon) across consumables, medicines, and equipment.
 // Uses a short sessionStorage TTL cache to minimize Firestore reads and shares data with Dashboard.
 export function useAlerts(options = {}) {
-  const threshold = options.threshold ?? 5;
+  // Align with InventoryModule status logic
+  const CRITICAL_MAX = options.criticalMax ?? 20;
+  const LOW_STOCK_MAX = options.lowStockMax ?? 60;
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const CACHE_KEY = 'dashboard_inventory_cache_v1';
+  const CACHE_KEY = 'dashboard_inventory_cache_v2';
 
     const saveCache = (nextItems) => {
       try { sessionStorage.setItem(CACHE_KEY, JSON.stringify({ at: Date.now(), items: nextItems })); } catch {}
@@ -38,7 +41,8 @@ export function useAlerts(options = {}) {
       const name = data.item_name || data.name || '';
       const unit_cost = Number(data.unit_cost || 0);
       const exp = parseDate(data.expired_date || data.expiration || data.expiration_date);
-      return { id: d.id, name, quantity, unit, unit_cost, expiration: exp, category };
+      const status = data.status || null; // may be stale; used to align with UI display
+      return { id: d.id, name, quantity, unit, unit_cost, expiration: exp, category, status };
     };
 
     setLoading(true);
@@ -49,7 +53,9 @@ export function useAlerts(options = {}) {
           const others = prev.filter((it) => it.category !== colName);
           const next = [
             ...others,
-            ...snap.docs.map((d) => mapDoc(d, colName)),
+            ...snap.docs
+              .filter((d) => !isPlaceholderDoc(d.id, d.data()))
+              .map((d) => mapDoc(d, colName)),
           ];
           saveCache(next);
           return next;
@@ -69,13 +75,32 @@ export function useAlerts(options = {}) {
 
   const alerts = useMemo(() => {
     return items.reduce((acc, it) => {
-      const reasons = [];
-      if (it.quantity < threshold) reasons.push(`Low Stock - ${it.quantity} ${it.unit}`);
-      if (it.expiration && it.expiration <= in30 && it.expiration >= now) reasons.push(`Expiring Soon - ${it.expiration.toLocaleDateString('en-US')}`);
-      if (reasons.length) acc.push({ item: it.name || '(Unnamed)', reason: reasons.join(' • '), category: it.category });
+      // Prefer stored status to match what user sees in the Inventory table
+      let severity = null;
+      if (it.status === 'Critical' || it.status === 'Low Stock') {
+        severity = it.status;
+      } else if (!it.status) { // fallback if status not stored yet
+        if (it.quantity <= CRITICAL_MAX) severity = 'Critical';
+        else if (it.quantity <= LOW_STOCK_MAX) severity = 'Low Stock';
+      }
+      if (severity) {
+        acc.push({
+          item: it.name || '(Unnamed)',
+          reason: `${severity} - ${it.quantity} ${it.unit}`,
+          category: it.category,
+          severity,
+          quantity: it.quantity,
+          unit: it.unit,
+        });
+      }
       return acc;
-    }, []);
-  }, [items, threshold]);
+    }, []).sort((a,b) => {
+      const order = { 'Critical':0,'Low Stock':1 };
+      const d = order[a.severity]-order[b.severity];
+      if (d!==0) return d;
+      return a.quantity - b.quantity;
+    });
+  }, [items, CRITICAL_MAX, LOW_STOCK_MAX]);
 
-  return { alerts, loading };
+  return { alerts, loading, CRITICAL_MAX, LOW_STOCK_MAX };
 }

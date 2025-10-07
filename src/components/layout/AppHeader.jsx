@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Bell as BellIcon, Search as SearchIcon } from "lucide-react";
+import { Bell as BellIcon, Search as SearchIcon, AlertOctagon, AlertTriangle } from "lucide-react";
 import { Input } from "../ui/input";
 import { Badge } from "../ui/badge";
 import { useLastName } from "../../hooks/useLastName";
@@ -22,7 +22,8 @@ export const AppHeader = ({ title, subtitle, searchPlaceholder = "Search invento
 
   const unreadAlerts = useMemo(() => (alerts || []).filter((a) => !readMap[keyFor(a)]), [alerts, readMap]);
   const count = unreadAlerts.length;
-  const topAlerts = useMemo(() => unreadAlerts.slice(0, 6), [unreadAlerts]);
+  // Show all alerts (capped) regardless of read status so they don't disappear when marked read
+  const displayedAlerts = useMemo(() => (alerts || []).slice(0, 25), [alerts]);
   const markAsRead = (a) => setReadMap((prev) => ({ ...prev, [keyFor(a)]: Date.now() }));
   const markAllAsRead = () => setReadMap((prev) => ({ ...prev, ...Object.fromEntries((alerts || []).map((a) => [keyFor(a), Date.now()])) }));
   return (
@@ -71,29 +72,42 @@ export const AppHeader = ({ title, subtitle, searchPlaceholder = "Search invento
               </div>
             </div>
             <div className="max-h-72 overflow-auto divide-y divide-gray-100">
-              {topAlerts.length === 0 ? (
+              {displayedAlerts.length === 0 ? (
                 <div className="p-4 text-sm text-gray-500">You're all caught up 🎉</div>
               ) : (
-                topAlerts.map((a, i) => (
-                  <div key={i} className="px-4 py-3 hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => markAsRead(a)}>
-                    <div className="flex items-start gap-3">
-                      <div className="mt-0.5 w-2 h-2 rounded-full bg-red-500" />
-                      <div>
-                        <div className="[font-family:'Inter',Helvetica] text-gray-900 text-sm font-medium">{a.item} <span className="text-xs text-gray-500">({a.category})</span></div>
-                        <div className="[font-family:'Oxygen',Helvetica] text-xs text-gray-600 mt-0.5">{a.reason}</div>
-                      </div>
-                      <div className="ml-auto">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); markAsRead(a); }}
-                          className="text-xs text-gray-500 hover:text-gray-700"
-                          title="Mark as read"
-                        >
-                          Mark as read
-                        </button>
+                displayedAlerts.map((a, i) => {
+                  const isRead = Boolean(readMap[keyFor(a)]);
+                  const icon = a.severity === 'Critical' ? (
+                    <AlertOctagon className={`w-5 h-5 ${isRead ? 'text-red-300' : 'text-red-500'}`} />
+                  ) : (
+                    <AlertTriangle className={`w-5 h-5 ${isRead ? 'text-amber-300' : 'text-amber-500'}`} />
+                  );
+                  return (
+                    <div key={i} className={`px-4 py-3 transition-colors cursor-pointer ${isRead ? 'opacity-70 hover:bg-gray-50' : 'hover:bg-gray-50'}`}> 
+                      <div className="flex items-start gap-3">
+                        <div className="mt-0.5">{icon}</div>
+                        <div>
+                          <div className="[font-family:'Inter',Helvetica] text-gray-900 text-sm font-medium flex items-center gap-2">
+                            {a.item} <span className="text-xs text-gray-500">({a.category})</span>
+                            {isRead && <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">Read</span>}
+                          </div>
+                          <div className="[font-family:'Oxygen',Helvetica] text-xs text-gray-600 mt-0.5">{a.reason}</div>
+                        </div>
+                        <div className="ml-auto">
+                          {!isRead && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); markAsRead(a); }}
+                              className="text-xs text-[#00b7c2] hover:text-[#009ba5]"
+                              title="Mark as read"
+                            >
+                              Mark as read
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
             <div className="px-4 py-2 text-right">
