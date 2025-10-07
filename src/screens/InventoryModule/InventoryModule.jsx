@@ -1,6 +1,7 @@
 import { Bell as BellIcon, Search as SearchIcon, Filter as FilterIcon, Package as PackageIcon, X as XIcon, Calendar as CalendarIcon, ChevronDown as ChevronDownIcon, Check as CheckIcon, Plus as PlusIcon, Minus as MinusIcon, Pencil as PencilIcon, Trash as TrashIcon } from "lucide-react";
-import { collection, addDoc, getDocs, serverTimestamp, doc, writeBatch, updateDoc, deleteDoc, increment } from "firebase/firestore";
-import { db } from "../../firebase";
+import { collection, addDoc, getDocs, serverTimestamp, doc, writeBatch, updateDoc, deleteDoc, increment, Timestamp, getDoc } from "firebase/firestore";
+import { isPlaceholderDoc } from "../../lib/placeholders";
+import { db, auth } from "../../firebase";
 import React, { useEffect, useState } from "react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -18,6 +19,18 @@ export const InventoryModule = () => {
     const handler = (e) => setSidebarCollapsed(Boolean(e.detail?.collapsed));
     window.addEventListener('sidebar:toggle', handler);
     return () => window.removeEventListener('sidebar:toggle', handler);
+  }, []);
+  // Close any open dropdown when clicking outside
+  useEffect(() => {
+    const closeOnOutside = (e) => {
+      const t = e.target;
+      if (!t.closest?.('.inv-status-filter')) setStatusOpen(false);
+      if (!t.closest?.('.inv-qa')) setQaOpen(false);
+      if (!t.closest?.('.inv-supplier')) setSupplierOpen(false);
+      if (!t.closest?.('.inv-unit')) setUnitOpen(false);
+    };
+    document.addEventListener('mousedown', closeOnOutside);
+    return () => document.removeEventListener('mousedown', closeOnOutside);
   }, []);
   const [activeTab, setActiveTab] = useState("consumables");
   const [isNewOrderOpen, setIsNewOrderOpen] = useState(false);
@@ -38,6 +51,7 @@ export const InventoryModule = () => {
   const [restockItems, setRestockItems] = useState([]); // [{index, name, unit, addQty}]
   const [isStockOutOpen, setIsStockOutOpen] = useState(false);
   const [stockOutItems, setStockOutItems] = useState([]); // [{index, name, unit, currentQty, outQty, status}]
+  const [stockOutNotes, setStockOutNotes] = useState(""); // shared note input for this stock out batch
   const [isStockOutSummaryOpen, setIsStockOutSummaryOpen] = useState(false);
   const [stockOutSummary, setStockOutSummary] = useState([]); // [{name,before,out,after}]
   const [editedRows, setEditedRows] = useState({}); // pending inline edits per _id
@@ -80,9 +94,9 @@ export const InventoryModule = () => {
   const [dataMap, setDataMap] = useState(initialData);
 
   const statusStyleMap = {
-    Critical: "bg-red-100 text-red-800",
-    "Low Stock": "bg-yellow-100 text-yellow-800",
-    "In Stock": "bg-green-100 text-green-800",
+    Critical: "bg-red-100 text-red-800 hover:bg-red-50 transition-colors",
+    "Low Stock": "bg-yellow-100 text-yellow-800 hover:bg-yellow-50 transition-colors",
+    "In Stock": "bg-green-100 text-green-800 hover:bg-green-50 transition-colors",
   };
   // Status filter dropdown state
   const [statusOpen, setStatusOpen] = useState(false);
@@ -95,7 +109,8 @@ export const InventoryModule = () => {
     'Critical': 'bg-red-500',
   };
 
-  const baseRows = dataMap[activeTab] ?? [];
+  // Base rows already filtered at fetch time, but defensively filter again in case cache contained a placeholder
+  const baseRows = (dataMap[activeTab] ?? []).filter(r => r && r._id !== 'dummy');
   // Map to keep original index for actions
   const displayRows = baseRows
     .map((r, i) => ({ ...r, _sourceIndex: i }))
@@ -117,7 +132,8 @@ export const InventoryModule = () => {
       }
     }
     return {
-      item: data.item_name || data.name || "",
+      // Include 'item' (created by StockLogs Received flow) so name appears
+      item: data.item_name || data.item || data.name || "",
       quantity: `${qtyNum} ${unit}`,
       expiration: expirationStr,
       supplier: data.supplier || "",
@@ -149,10 +165,44 @@ export const InventoryModule = () => {
       setDataMap((prev) => ({ ...prev, [tab]: cached }));
       return;
     }
-    const snap = await getDocs(collection(db, tab));
-    const rows = snap.docs.map(mapDocToRow);
+    const norm = normalizeCategory(tab);
+    let snap = await getDocs(collection(db, norm));
+    // Fallback: if empty and norm differs from original or common variant, check variants
+    if (snap.empty) {
+      const variants = new Set([tab, norm]);
+      if (norm === 'medicines') variants.add('medicine');
+      if (norm === 'equipment') variants.add('equipments');
+      for (const v of variants) {
+        if (v === norm) continue;
+        const s2 = await getDocs(collection(db, v));
+        if (!s2.empty) { snap = s2; break; }
+      }
+    }
+    const rows = snap.docs.filter(d => !isPlaceholderDoc(d.id, d.data())).map(mapDocToRow);
     setDataMap((prev) => ({ ...prev, [tab]: rows }));
     saveCache(tab, rows);
+  };
+
+  // Force refetch (skip cache) for a category
+  const forceRefetch = async (tab) => {
+    try {
+      const norm = normalizeCategory(tab);
+      let snap = await getDocs(collection(db, norm));
+      if (snap.empty) {
+        const variants = new Set([tab, norm]);
+        if (norm === 'medicines') variants.add('medicine');
+        if (norm === 'equipment') variants.add('equipments');
+        for (const v of variants) {
+          if (v === norm) continue;
+          const s2 = await getDocs(collection(db, v));
+          if (!s2.empty) { snap = s2; break; }
+        }
+      }
+      const rows = snap.docs.filter(d => !isPlaceholderDoc(d.id, d.data())).map(mapDocToRow);
+      setDataMap((prev) => ({ ...prev, [tab]: rows }));
+      // Update cache with fresh data
+      saveCache(tab, rows);
+    } catch (e) { console.error('Failed to force refetch for', tab, e); }
   };
 
   // Clear selected rows when tab changes or select mode exits
@@ -252,7 +302,7 @@ export const InventoryModule = () => {
           else if (when.seconds) ts = new Date(when.seconds * 1000);
           else ts = new Date(when);
         }
-        return { id: d.id, text: data.text || '', created_at: ts };
+        return { id: d.id, text: data.text || '', created_at: ts, created_by: data.created_by || null, created_by_name: data.created_by_name || null };
       }).sort((a,b) => (b.created_at?.getTime?.()||0) - (a.created_at?.getTime?.()||0));
       setNotesList(list);
     } catch (e) {
@@ -267,12 +317,32 @@ export const InventoryModule = () => {
     const text = (newNote || '').trim();
     if (!text || !notesItem?.id) return;
     try {
+      // Resolve user identity for attribution
+      let createdBy = null;
+      let createdByName = null;
+      try {
+        const user = auth.currentUser;
+        if (user) {
+          createdBy = user.uid;
+          createdByName = user.displayName || null;
+          if (!createdByName) {
+            // Attempt to fetch from accounts collection
+            const acctSnap = await getDoc(doc(db, 'accounts', user.uid));
+            if (acctSnap.exists()) {
+              const ad = acctSnap.data() || {};
+              createdByName = ad.full_name || [ad.first_name, ad.last_name].filter(Boolean).join(' ').trim() || null;
+            }
+          }
+        }
+      } catch {}
       const ref = await addDoc(collection(db, notesItem.category, notesItem.id, 'notes'), {
         text,
         created_at: serverTimestamp(),
+        created_by: createdBy,
+        created_by_name: createdByName,
       });
       // Optimistic: prepend with local timestamp for now; it will match server shortly
-      const local = { id: ref.id, text, created_at: new Date() };
+      const local = { id: ref.id, text, created_at: new Date(), created_by: createdBy, created_by_name: createdByName };
       setNotesList((prev) => [local, ...prev]);
       setNewNote("");
       // Increment parent notes_count in Firestore and locally
@@ -361,6 +431,31 @@ export const InventoryModule = () => {
     }
   };
 
+  // Mark-as-read: same effect as deleting but no confirmation modal; silent removal
+  const markNoteAsRead = async (noteId) => {
+    if (!noteId || !notesItem?.id) return;
+    try {
+      await deleteDoc(doc(db, notesItem.category, notesItem.id, 'notes', noteId));
+      setNotesList((prev) => prev.filter((n) => n.id !== noteId));
+      try { await updateDoc(doc(db, notesItem.category, notesItem.id), { notes_count: increment(-1) }); } catch {}
+      setDataMap((prev) => {
+        const copy = { ...prev };
+        const list = [...(copy[notesItem.category] || [])];
+        const idx = list.findIndex((r) => r._id === notesItem.id);
+        if (idx >= 0) {
+          const curr = list[idx];
+          const nextCount = Math.max(0, (curr.notesCount || 0) - 1);
+          list[idx] = { ...curr, notesCount: nextCount };
+          copy[notesItem.category] = list;
+          try { sessionStorage.setItem(getCacheKey(notesItem.category), JSON.stringify({ at: Date.now(), rows: list })); } catch {}
+        }
+        return copy;
+      });
+    } catch (e) {
+      console.error('Failed to mark note as read', e);
+    }
+  };
+
   const legendItems = (() => {
     const counts = baseRows.reduce(
       (acc, r) => {
@@ -382,6 +477,19 @@ export const InventoryModule = () => {
   // Fetch on tab change if needed
   useEffect(() => { if (activeTab !== 'consumables') fetchTabIfNeeded(activeTab); }, [activeTab]);
 
+  // Listen for inventory refresh events triggered after an order is marked Received
+  useEffect(() => {
+    const handler = (e) => {
+      const cat = e.detail?.category;
+      if (!cat) return;
+      // Invalidate cache by removing it so future fetch uses Firestore
+      try { sessionStorage.removeItem(getCacheKey(cat)); } catch {}
+      forceRefetch(cat);
+    };
+    window.addEventListener('inventory:refresh', handler);
+    return () => window.removeEventListener('inventory:refresh', handler);
+  }, []);
+
   const [isSaving, setIsSaving] = useState(false);
 
   const handleSave = async () => {
@@ -397,39 +505,33 @@ export const InventoryModule = () => {
         setIsSaving(false);
         return;
       }
-      const collectionName = activeTab; // write to the current tab collection
+      const collectionName = activeTab; // where the item will belong once received
+      // Allow dev override for lock window (ms) using localStorage key 'stocklogs.lockMs'
+      let lockMs = 48 * 60 * 60 * 1000; // 48h default
+      try {
+        const override = localStorage.getItem('stocklogs.lockMs');
+        if (override) {
+          const n = Number(override);
+            if (!isNaN(n) && n > 0) lockMs = n;
+        }
+      } catch {}
+
       const payload = {
         item_name: itemName,
+        item: itemName, // duplicate for downstream consumers expecting either field
         quantity: qty,
         supplier: supplierValue,
         unit_cost: cost,
         units: unitValue,
         created_at: serverTimestamp(),
+        lock_until: Timestamp.fromDate(new Date(Date.now() + lockMs)),
+        created_by: auth?.currentUser?.uid || null,
+        status: "Ordered",
+        category: collectionName,
       };
 
-      // Save to ordered (log) and consumables (inventory)
-      const [logRef, consRef] = await Promise.all([
-        addDoc(collection(db, "ordered"), payload),
-        addDoc(collection(db, collectionName), { ...payload, status: "In Stock", notes_count: 0 }),
-      ]);
-
-      // Optimistically update UI and cache without refetching
-      const status = qty <= 20 ? 'Critical' : qty <= 60 ? 'Low Stock' : 'In Stock';
-      const newRow = {
-        item: itemName,
-        quantity: `${qty} ${unitValue}`,
-        expiration: '—',
-        supplier: supplierValue,
-        unitCost: `₱${cost.toFixed(2)}`,
-        status,
-        notesCount: 0,
-        _id: consRef.id,
-      };
-      setDataMap((prev) => {
-        const rows = [...(prev[collectionName] || []), newRow];
-        try { sessionStorage.setItem(getCacheKey(collectionName), JSON.stringify({ at: Date.now(), rows })); } catch {}
-        return { ...prev, [collectionName]: rows };
-      });
+      // Save only to 'ordered' (Transaction Tracker). Inventory item will be created when status becomes 'Received'.
+      await addDoc(collection(db, "ordered"), payload);
 
       // reset form
       setItemNameValue("");
@@ -438,7 +540,7 @@ export const InventoryModule = () => {
       setSupplierValue("MedSupply Co.");
       setUnitValue("boxes");
 
-      setIsNewOrderOpen(false);
+  setIsNewOrderOpen(false);
       setTimeout(() => { setSuccessType('newOrder'); setIsSuccessOpen(true); }, 180);
     } catch (e) {
       console.error("Failed to save order", e);
@@ -452,6 +554,56 @@ export const InventoryModule = () => {
     { id: "medicines", label: "Medicines" },
     { id: "equipment", label: "Equipment" }
   ];
+
+  // Normalize incoming category identifiers to match the canonical collection names used when writing
+  function normalizeCategory(c) {
+    const v = (c || '').toString().trim().toLowerCase();
+    if (v === 'medicine') return 'medicines';
+    if (v === 'equipments') return 'equipment';
+    if (['consumable','consumables'].includes(v)) return 'consumables';
+    if (['medicines'].includes(v)) return 'medicines';
+    if (['equipment'].includes(v)) return 'equipment';
+    return 'consumables';
+  }
+
+  // ==== DEV / DEBUG HELPERS =================================================
+  // Deletes all non-placeholder docs in the specified category (handles singular/plural variants)
+  const devDeleteCategoryDocs = async (cat) => {
+    const norm = normalizeCategory(cat);
+    const variants = new Set([norm, cat]);
+    if (norm === 'medicines') variants.add('medicine');
+    if (norm === 'equipment') variants.add('equipments');
+    try {
+      for (const colName of variants) {
+        const snap = await getDocs(collection(db, colName));
+        if (snap.empty) continue;
+        const batch = writeBatch(db);
+        let any = false;
+        snap.docs.forEach(d => {
+          const data = d.data() || {};
+            if (isPlaceholderDoc(d.id, data)) return; // preserve placeholder/dummy
+            batch.delete(doc(db, colName, d.id));
+            any = true;
+        });
+        if (any) await batch.commit();
+      }
+    } catch (e) { console.error('DEV: failed deleting docs for', cat, e); }
+  };
+
+  // Clears in-memory & cached rows for a category and deletes underlying docs.
+  const debugClearCategory = async (cat) => {
+    const norm = normalizeCategory(cat || activeTab);
+    await devDeleteCategoryDocs(norm);
+    // Remove cache + in-memory data
+    try { sessionStorage.removeItem(getCacheKey(norm)); } catch {}
+    setDataMap(prev => ({ ...prev, [norm]: [] }));
+  };
+
+  // Expose a global helper for quick console access (window._invClearCategory('medicines'))
+  useEffect(() => {
+    window._invClearCategory = (c) => debugClearCategory(c);
+    return () => { try { delete window._invClearCategory; } catch {} };
+  }, []);
 
   // Helpers for restock modal
   const openRestock = () => {
@@ -476,10 +628,12 @@ export const InventoryModule = () => {
     setDataMap((prev) => {
       const copy = { ...prev };
       const list = [...(copy[activeTab] || [])];
-      restockItems.forEach(({ index, currentQty, addQty, unit }) => {
+    restockItems.forEach(({ index, currentQty, addQty, unit }) => {
         if (!addQty) return;
         const r = { ...list[index] };
-        const newQty = Math.max(0, (currentQty || 0) + addQty);
+      const numericAdd = typeof addQty === 'number' ? addQty : parseInt(addQty, 10) || 0;
+      if (!numericAdd) return;
+      const newQty = Math.max(0, (currentQty || 0) + numericAdd);
         r.quantity = `${newQty} ${unit}`;
         r.status = newQty <= 20 ? 'Critical' : newQty <= 60 ? 'Low Stock' : 'In Stock';
         list[index] = r;
@@ -491,9 +645,10 @@ export const InventoryModule = () => {
     try {
       const batch = writeBatch(db);
       restockItems.forEach(({ index, currentQty, addQty }) => {
-        if (!addQty) return;
+        const numericAdd = typeof addQty === 'number' ? addQty : parseInt(addQty, 10) || 0;
+        if (!numericAdd) return;
         const row = baseRows[index];
-        const newQty = Math.max(0, (currentQty || 0) + addQty);
+        const newQty = Math.max(0, (currentQty || 0) + numericAdd);
         const status = newQty <= 20 ? 'Critical' : newQty <= 60 ? 'Low Stock' : 'In Stock';
         batch.update(doc(db, activeTab, row._id), { quantity: newQty, status });
       });
@@ -514,7 +669,8 @@ export const InventoryModule = () => {
       const m = /^\s*(\d+)\s*(.*)$/.exec(r.quantity || "0 units");
       const current = m ? parseInt(m[1], 10) : 0;
       const unit = m ? (m[2] || "units").trim() : "units";
-      return { index: idx, name: r.item, unit, currentQty: current, outQty: 1, status: r.status };
+      // Start with blank outQty so user enters value manually
+      return { index: idx, name: r.item, unit, currentQty: current, outQty: '', status: r.status };
     });
     setStockOutItems(list);
     setIsStockOutOpen(true);
@@ -527,8 +683,9 @@ export const InventoryModule = () => {
   const confirmStockOut = async () => {
     // Precompute summary to avoid side effects inside state updaters (prevents duplicates in StrictMode)
     const summary = stockOutItems.map(({ index, name, currentQty, outQty, unit }) => {
-      const after = Math.max(0, (currentQty || 0) - (outQty || 0));
-      return { index, name, before: currentQty, out: outQty, after, unit };
+      const numericOut = typeof outQty === 'number' ? outQty : parseInt(outQty, 10) || 0; // no clamping – allow any amount
+      const after = Math.max(0, (currentQty || 0) - numericOut); // keep inventory floor at 0 visually
+      return { index, name, before: currentQty, out: numericOut, after, unit };
     });
 
     let updatedList;
@@ -556,14 +713,24 @@ export const InventoryModule = () => {
       await batch.commit();
       try { sessionStorage.setItem(getCacheKey(activeTab), JSON.stringify({ at: Date.now(), rows: updatedList })); } catch {}
       // Log stock-out events for dashboard usage trend
-      const logs = summary.filter(s => (s.out || 0) > 0).map((s) => ({
-        category: activeTab,
-        item_name: s.name,
-        quantity: Number(s.out || 0),
-        unit: s.unit,
-        type: 'stock_out',
-        timestamp: serverTimestamp(),
-      }));
+      const refBase = Date.now().toString(36).toUpperCase();
+      const logs = summary
+        .filter(s => (s.out || 0) > 0)
+        .map((s, i) => {
+          const invRow = baseRows[s.index] || {};
+          return {
+            category: activeTab,
+            item_name: s.name,
+            quantity: Number(s.out || 0),
+            unit: s.unit,
+            type: 'stock_out',
+            created_by: auth?.currentUser?.uid || null,
+            supplier: invRow.supplier || '',
+            reference: `SO-${refBase}-${i+1}`,
+            timestamp: serverTimestamp(),
+            notes: stockOutNotes.trim() || '',
+          };
+        });
       if (logs.length) {
         try {
           await Promise.all(logs.map((payload) => addDoc(collection(db, 'stock_logs'), payload)));
@@ -573,7 +740,8 @@ export const InventoryModule = () => {
       }
     } catch (e) { console.error('Failed to persist stock out', e); }
 
-    setIsStockOutOpen(false);
+  setIsStockOutOpen(false);
+  setStockOutNotes("");
     setSelectMode(false);
     setSelectedRows(new Set());
     setStockOutSummary(summary);
@@ -657,13 +825,13 @@ export const InventoryModule = () => {
 
           {/* Action Buttons */}
           <div className="px-8 py-4 flex justify-end gap-4 relative">
-          <div className="relative">
-            <Button onClick={() => setStatusOpen((v) => !v)} className="px-8 py-3 bg-[#00b7c2] hover:bg-[#009ba5] text-white rounded-full [font-family:'Oxygen',Helvetica] font-semibold text-lg shadow-lg">
+          <div className="relative inv-status-filter">
+            <Button onClick={() => { setStatusOpen((v) => { const next = !v; if (next) { setQaOpen(false); setSupplierOpen(false); setUnitOpen(false);} return next; }); }} className="px-8 py-3 bg-[#00b7c2] hover:bg-[#009ba5] text-white rounded-full [font-family:'Oxygen',Helvetica] font-semibold text-lg shadow-lg">
               <FilterIcon className="w-4 h-4 mr-2" />
               {statusFilter}
               <ChevronDownIcon className={`ml-2 w-4 h-4 transition-transform ${statusOpen ? 'rotate-180' : ''}`} />
             </Button>
-            <div className={`${statusOpen ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-95 -translate-y-1 pointer-events-none'} absolute right-0 mt-2 w-56 bg-white rounded-2xl border border-gray-100 shadow-[0_12px_40px_rgba(0,0,0,0.18)] transition-all duration-150 origin-top-right`}
+      <div className={`${statusOpen ? 'opacity-100 scale-100 translate-y-0 dropdown-anim-in' : 'opacity-0 scale-95 -translate-y-1 pointer-events-none'} absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-xl ring-1 ring-black/5 transition-all duration-150 origin-top-right overflow-hidden`}
                  onMouseLeave={() => setStatusOpen(false)}>
               {/* Arrow */}
               <div className="absolute -top-1.5 right-6 w-3 h-3 bg-white border-t border-l border-gray-100 rotate-45" />
@@ -688,16 +856,16 @@ export const InventoryModule = () => {
               </div>
             </div>
           </div>
-          <div className="relative">
-            <Button onClick={() => setQaOpen((v) => !v)} className="px-8 py-3 bg-[#00b7c2] hover:bg-[#009ba5] text-white rounded-full [font-family:'Oxygen',Helvetica] font-semibold text-lg shadow-lg">
+          <div className="relative inv-qa">
+            <Button onClick={() => { setQaOpen((v) => { const next = !v; if (next) { setStatusOpen(false); setSupplierOpen(false); setUnitOpen(false);} return next; }); }} className="px-8 py-3 bg-[#00b7c2] hover:bg-[#009ba5] text-white rounded-full [font-family:'Oxygen',Helvetica] font-semibold text-lg shadow-lg">
               Quick Actions
               <ChevronDownIcon className={`ml-2 w-4 h-4 transition-transform ${qaOpen ? 'rotate-180' : ''}`} />
             </Button>
-            <div className={`${qaOpen ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-95 -translate-y-1 pointer-events-none'} absolute right-0 mt-2 w-48 bg-white rounded-xl border border-gray-200 shadow-lg transition-all duration-150 origin-top-right overflow-hidden`}
+      <div className={`${qaOpen ? 'opacity-100 scale-100 translate-y-0 dropdown-anim-in' : 'opacity-0 scale-95 -translate-y-1 pointer-events-none'} absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-xl ring-1 ring-black/5 transition-all duration-150 origin-top-right overflow-hidden`}
                  onMouseLeave={() => setQaOpen(false)}>
               <button onClick={handleToggleEdit} className="w-full text-left px-4 py-2 hover:bg-gray-50 text-gray-700 flex items-center gap-2">
                 <span className={`inline-block w-2 h-2 rounded-full ${editMode ? 'bg-[#00b7c2]' : 'bg-transparent border border-gray-300'}`} />
-                {editMode ? 'Done Editing' : 'Edit'}
+                Edit
               </button>
               <div className="h-px bg-gray-100" />
               <button onClick={handleToggleSelect} className="w-full text-left px-4 py-2 hover:bg-gray-50 text-gray-700 flex items-center gap-2">
@@ -736,7 +904,7 @@ export const InventoryModule = () => {
           </div>
 
           {/* Main Content Card */}
-          <div className="bg-white rounded-2xl shadow-[0_20px_40px_rgba(0,0,0,0.08)] border border-gray-200 p-6 h-full">
+          <div className="bg-white rounded-2xl shadow-[0_20px_40px_rgba(0,0,0,0.08)] border border-gray-200 p-6 flex flex-col min-h-[440px] max-h-[calc(100vh-300px)]">
             {/* Overview Header */}
             <div className="flex items-center justify-between mb-6">
               <h2 className="[font-family:'Inter',Helvetica] font-semibold text-xl text-gray-900">
@@ -745,7 +913,7 @@ export const InventoryModule = () => {
             </div>
 
             {/* Inventory Table */}
-            <div className="overflow-hidden rounded-xl border border-gray-200 shadow-sm">
+            <div className="overflow-hidden rounded-xl border border-gray-200 shadow-sm flex-1 overflow-y-auto min-h-[180px]">
               <table className="w-full">
                 <thead className="bg-gray-50">
                   <tr>
@@ -819,14 +987,27 @@ export const InventoryModule = () => {
                         </Badge>
                       </td>
                       <td className="px-6 py-4">
-                        <div className="relative inline-block">
-                          <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors" aria-label="Row notes" onClick={() => openNotes(item._sourceIndex)}>
-                            <img src={menuIcon} alt="Actions" className="w-4 h-4 object-contain" />
-                          </button>
-                          {Number(item.notesCount || 0) > 0 && (
-                            <span className="absolute -top-1 -right-1 min-w-[16px] h-[16px] px-[3px] rounded-full bg-[#00b7c2] text-white text-[10px] leading-[16px] text-center border border-white">
-                              {item.notesCount}
-                            </span>
+                        <div className="flex items-center gap-1">
+                          <div className="relative">
+                            <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors" aria-label="Row notes" onClick={() => openNotes(item._sourceIndex)}>
+                              <img src={menuIcon} alt="Notes" className="w-4 h-4 object-contain" />
+                            </button>
+                            {Number(item.notesCount || 0) > 0 && (
+                              <span className="absolute -top-1 -right-1 min-w-[16px] h-[16px] px-[3px] rounded-full bg-[#00b7c2] text-white text-[10px] leading-[16px] text-center border border-white shadow-sm">
+                                {Math.min(99, Number(item.notesCount || 0))}
+                              </span>
+                            )}
+                          </div>
+                          {editMode && (
+                            <button
+                              className="p-2 hover:bg-gray-100 rounded-lg transition-colors text-green-600"
+                              title="Finish editing"
+                              onClick={handleToggleEdit}
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                                <path fillRule="evenodd" d="M16.704 5.29a1 1 0 00-1.408-1.42L8.25 10.955 5.7 8.4a1 1 0 10-1.4 1.428l3.25 3.186a1 1 0 001.404-.006l7.75-7.72z" clipRule="evenodd" />
+                              </svg>
+                            </button>
                           )}
                         </div>
                       </td>
@@ -835,41 +1016,34 @@ export const InventoryModule = () => {
                 </tbody>
               </table>
             </div>
-
-            {/* Bottom Actions and Legend */}
-            <div className="flex items-center justify-between mt-6">
-              {/* Action Buttons */}
-              <div className="flex gap-4">
-                <Button onClick={() => setIsNewOrderOpen(true)} className="px-6 py-2 bg-[#00b7c2] hover:bg-[#009ba5] text-white rounded-full [font-family:'Oxygen',Helvetica] font-semibold shadow-lg">
-                  New Order
-                </Button>
-                <Button
-                  onClick={openStockOut}
-                  aria-disabled={!(selectMode && selectedRows.size > 0)}
-                  className={`px-6 py-2 rounded-full [font-family:'Oxygen',Helvetica] font-semibold shadow-lg ${selectMode && selectedRows.size > 0 ? 'bg-[#00b7c2] hover:bg-[#009ba5] text-white' : 'bg-[#9CA3AF] text-white pointer-events-none opacity-100'}`}
-                >
-                  Stock out
-                </Button>
-                <Button
-                  onClick={openRestock}
-                  aria-disabled={!(selectMode && selectedRows.size > 0)}
-                  className={`px-6 py-2 rounded-full [font-family:'Oxygen',Helvetica] font-semibold shadow-lg ${selectMode && selectedRows.size > 0 ? 'bg-[#00b7c2] hover:bg-[#009ba5] text-white' : 'bg-[#9CA3AF] text-white pointer-events-none opacity-100'}`}
-                >
-                  Restock
-                </Button>
-              </div>
-
-              {/* Status Legend */}
-              <div className="flex items-center gap-6">
-                {legendItems.map((status, index) => (
-                  <div key={status.label} className="flex items-center gap-2">
-                    <div className={`w-4 h-4 ${status.color} rounded-full border border-gray-400 shadow-inner`} />
-                    <span className="[font-family:'Oxygen',Helvetica] text-gray-600 text-sm">
-                      {status.label}
-                    </span>
-                  </div>
-                ))}
-              </div>
+          </div>
+          <div className="flex items-center justify-between mt-4">
+            <div className="flex gap-4">
+              <Button onClick={() => setIsNewOrderOpen(true)} className="px-6 py-2 bg-[#00b7c2] hover:bg-[#009ba5] text-white rounded-full [font-family:'Oxygen',Helvetica] font-semibold shadow-lg">
+                New Order
+              </Button>
+              <Button
+                onClick={openStockOut}
+                aria-disabled={!(selectMode && selectedRows.size > 0)}
+                className={`px-6 py-2 rounded-full [font-family:'Oxygen',Helvetica] font-semibold shadow-lg ${selectMode && selectedRows.size > 0 ? 'bg-[#00b7c2] hover:bg-[#009ba5] text-white' : 'bg-[#9CA3AF] text-white pointer-events-none opacity-100'}`}
+              >
+                Stock out
+              </Button>
+              <Button
+                onClick={openRestock}
+                aria-disabled={!(selectMode && selectedRows.size > 0)}
+                className={`px-6 py-2 rounded-full [font-family:'Oxygen',Helvetica] font-semibold shadow-lg ${selectMode && selectedRows.size > 0 ? 'bg-[#00b7c2] hover:bg-[#009ba5] text-white' : 'bg-[#9CA3AF] text-white pointer-events-none opacity-100'}`}
+              >
+                Restock
+              </Button>
+            </div>
+            <div className="flex items-center gap-6">
+              {legendItems.map((status) => (
+                <div key={status.label} className="flex items-center gap-2">
+                  <div className={`w-4 h-4 ${status.color} rounded-full border border-gray-400 shadow-inner`} />
+                  <span className="[font-family:'Oxygen',Helvetica] text-gray-600 text-sm">{status.label}</span>
+                </div>
+              ))}
             </div>
           </div>
         </div>
@@ -914,14 +1088,14 @@ export const InventoryModule = () => {
               </div>
               <div>
                 <label className="block text-sm text-gray-600 mb-1">Supplier Name</label>
-                <div className="relative">
+                <div className="relative inv-supplier">
                   <button type="button"
-                          onClick={() => setSupplierOpen((v) => !v)}
+                            onClick={() => setSupplierOpen((v) => { const next = !v; if (next) { setUnitOpen(false); setStatusOpen(false); setQaOpen(false);} return next; })}
                           className="w-full h-10 pl-4 pr-9 rounded-full border border-gray-300 text-left focus:border-[#00b7c2] focus:ring-2 focus:ring-[#00b7c2]/20">
                     <span className="text-gray-700">{supplierValue}</span>
                     <ChevronDownIcon className={`absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 transition-transform ${supplierOpen ? 'rotate-180' : ''}`} />
                   </button>
-                  <div className={`${supplierOpen ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-95 -translate-y-1 pointer-events-none'} absolute z-10 mt-2 w-full bg-white rounded-xl border border-gray-200 shadow-lg transition-all duration-150 origin-top`}
+         <div className={`${supplierOpen ? 'opacity-100 scale-100 translate-y-0 dropdown-anim-in' : 'opacity-0 scale-95 -translate-y-1 pointer-events-none'} absolute z-10 mt-2 w-full bg-white rounded-xl shadow-xl ring-1 ring-black/5 transition-all duration-150 origin-top overflow-hidden`}
                        onMouseLeave={() => setSupplierOpen(false)}>
                     {['MedSupply Co.', 'DentalCare Ltd.', 'SafeMed Inc'].map(opt => (
                       <div key={opt}
@@ -944,14 +1118,14 @@ export const InventoryModule = () => {
               </div>
               <div>
                 <label className="block text-sm text-gray-600 mb-1">Units <span className="text-xs text-gray-400">(grams, vials, etc.)</span></label>
-                <div className="relative">
+                <div className="relative inv-unit">
                   <button type="button"
-                          onClick={() => setUnitOpen((v) => !v)}
+                          onClick={() => setUnitOpen((v) => { const next = !v; if (next) { setSupplierOpen(false); setStatusOpen(false); setQaOpen(false);} return next; })}
                           className="w-full h-10 pl-4 pr-9 rounded-full border border-gray-300 text-left focus:border-[#00b7c2] focus:ring-2 focus:ring-[#00b7c2]/20">
                     <span className="text-gray-700">{unitValue}</span>
                     <ChevronDownIcon className={`absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 transition-transform ${unitOpen ? 'rotate-180' : ''}`} />
                   </button>
-                  <div className={`${unitOpen ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-95 -translate-y-1 pointer-events-none'} absolute z-10 mt-2 w-full bg-white rounded-xl border border-gray-200 shadow-lg transition-all duration-150 origin-top`}
+         <div className={`${unitOpen ? 'opacity-100 scale-100 translate-y-0 dropdown-anim-in' : 'opacity-0 scale-95 -translate-y-1 pointer-events-none'} absolute z-10 mt-2 w-full bg-white rounded-xl shadow-xl ring-1 ring-black/5 transition-all duration-150 origin-top overflow-hidden`}
                        onMouseLeave={() => setUnitOpen(false)}>
                     {['boxes', 'packs', 'units', 'vials'].map(opt => (
                       <div key={opt}
@@ -1069,14 +1243,21 @@ export const InventoryModule = () => {
                       <div className="[font-family:'Inter',Helvetica] text-gray-900">{it.name}</div>
                       <div className="[font-family:'Oxygen',Helvetica] text-xs text-gray-500">{it.currentQty} {it.unit}</div>
                     </div>
-                    <div className="flex items-center gap-3">
-                      <Button onClick={() => adjustRestockQty(it.index, -1)} className="w-8 h-8 rounded-md bg-gray-100 hover:bg-gray-200 text-gray-700 p-0">
-                        <MinusIcon className="w-4 h-4" />
-                      </Button>
-                      <div className="min-w-10 text-center [font-family:'Inter',Helvetica]">{it.addQty}</div>
-                      <Button onClick={() => adjustRestockQty(it.index, 1)} className="w-8 h-8 rounded-md bg-gray-100 hover:bg-gray-200 text-gray-700 p-0">
-                        <PlusIcon className="w-4 h-4" />
-                      </Button>
+                    <div className="flex items-center">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        pattern="\\d{0,4}"
+                        placeholder="0"
+                        value={it.addQty}
+                        onChange={(e) => {
+                          let raw = e.target.value.replace(/[^0-9]/g, '');
+                          if (raw.length > 4) raw = raw.slice(0,4);
+                          // allow blank -> treated as 0 during confirm
+                          setRestockItems(prev => prev.map(p => p.index === it.index ? { ...p, addQty: raw } : p));
+                        }}
+                        className="w-24 h-9 rounded-md border border-gray-300 focus:border-[#00b7c2] focus:ring-2 focus:ring-[#00b7c2]/20 text-center [font-family:'Inter',Helvetica] text-gray-800 text-sm tracking-wide"
+                      />
                     </div>
                   </div>
                 ))}
@@ -1092,7 +1273,7 @@ export const InventoryModule = () => {
         </div>
       </div>
 
-      {/* Stock Out Modal */}
+  {/* Stock Out Modal */}
       <div className={`${isStockOutOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'} fixed inset-0 z-[60] flex items-center justify-center transition-opacity duration-200`}
            onClick={() => setIsStockOutOpen(false)}>
         <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" />
@@ -1140,24 +1321,53 @@ export const InventoryModule = () => {
                       <Badge className={`px-3 py-1 rounded-full text-xs font-medium ${statusStyleMap[it.status] || 'bg-gray-100 text-gray-700'}`}>{it.status}</Badge>
                     </div>
                     <div className="flex items-center gap-3">
-                      <Button onClick={() => adjustStockOutQty(it.index, -1)} className="w-8 h-8 rounded-md bg-gray-100 hover:bg-gray-200 text-gray-700 p-0">
+                      <Button onClick={() => setStockOutItems(prev => prev.map(p => p.index === it.index ? { ...p, outQty: String(Math.max(0,(parseInt(p.outQty,10)||0)-1)) } : p))} className="w-8 h-8 rounded-md bg-gray-100 hover:bg-gray-200 text-gray-700 p-0">
                         <MinusIcon className="w-4 h-4" />
                       </Button>
-                      <div className="min-w-10 text-center [font-family:'Inter',Helvetica]">{it.outQty}</div>
-                      <Button onClick={() => adjustStockOutQty(it.index, 1)} className="w-8 h-8 rounded-md bg-gray-100 hover:bg-gray-200 text-gray-700 p-0">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        pattern="\\d{0,4}"
+                        placeholder="0"
+                        value={it.outQty}
+                        onChange={(e) => {
+                          let raw = e.target.value.replace(/[^0-9]/g, '');
+                          if (raw.length > 4) raw = raw.slice(0,4);
+                          setStockOutItems(prev => prev.map(p => p.index === it.index ? { ...p, outQty: raw } : p));
+                        }}
+                        className="w-20 h-9 rounded-md border border-gray-300 focus:border-[#00b7c2] focus:ring-2 focus:ring-[#00b7c2]/20 text-center [font-family:'Inter',Helvetica] text-gray-800 text-sm tracking-wide"
+                      />
+                      <Button onClick={() => setStockOutItems(prev => prev.map(p => p.index === it.index ? { ...p, outQty: String(Math.min(9999,(parseInt(p.outQty,10)||0)+1)) } : p))} className="w-8 h-8 rounded-md bg-gray-100 hover:bg-gray-200 text-gray-700 p-0">
                         <PlusIcon className="w-4 h-4" />
                       </Button>
+                      <span className="text-xs text-gray-500">{it.unit}</span>
                     </div>
                   </div>
                 ))}
               </div>
             </div>
 
-            <div className="mt-6 flex items-center justify-center">
-              <Button onClick={confirmStockOut} className="px-8 py-2 rounded-full bg-[#00b7c2] hover:bg-[#009ba5] text-white shadow-lg">
-                Stock out
-              </Button>
+            {/* Notes Input */}
+            <div className="mt-6">
+              <label className="block text-sm text-gray-600 mb-1">Notes (applies to this stock out batch)</label>
+              <textarea
+                className="w-full min-h-[90px] rounded-lg border border-gray-300 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#00b7c2]/20 focus:border-[#00b7c2] text-sm"
+                placeholder="Add optional notes about why items are stocked out, usage context, patient case, etc."
+                value={stockOutNotes}
+                onChange={(e) => setStockOutNotes(e.target.value)}
+                maxLength={800}
+              />
+              <div className="mt-1 text-xs text-gray-400 text-right">{stockOutNotes.length}/800</div>
             </div>
+
+            {(() => { const anyValid = stockOutItems.some(it => parseInt(it.outQty,10) > 0); return (
+              <div className="mt-6 flex flex-col items-center gap-2">
+                <Button disabled={!anyValid} onClick={confirmStockOut} className={`px-8 py-2 rounded-full text-white shadow-lg ${!anyValid ? 'bg-gray-400 cursor-not-allowed' : 'bg-[#00b7c2] hover:bg-[#009ba5]'}`}>
+                  Stock out
+                </Button>
+                {!anyValid && <div className="text-xs text-gray-400">Enter at least one quantity</div>}
+              </div>
+            ); })()}
           </div>
         </div>
       </div>
@@ -1176,7 +1386,7 @@ export const InventoryModule = () => {
               <div className="w-8 h-8 rounded-full bg-white/15 flex items-center justify-center">
                 <PackageIcon className="w-5 h-5" />
               </div>
-              <div className="text-lg font-semibold">Notes{notesItem?.item ? ` • ${notesItem.item}` : ''}</div>
+              <div className="text-lg font-semibold">Notes</div>
             </div>
             <button onClick={() => setIsNotesOpen(false)} className="p-1 rounded-full hover:bg-white/10 transition-colors">
               <XIcon className="w-5 h-5" />
@@ -1223,12 +1433,26 @@ export const InventoryModule = () => {
                       ) : (
                         <div className="flex items-start justify-between gap-3">
                           <div>
-                            <div className="[font-family:'Inter',Helvetica] text-gray-900 text-sm">{n.text}</div>
-                            {n.created_at && (
-                              <div className="[font-family:'Oxygen',Helvetica] text-xs text-gray-500 mt-1">{n.created_at.toLocaleString('en-US')}</div>
-                            )}
+                            <div className="[font-family:'Inter',Helvetica] text-gray-900 text-sm whitespace-pre-wrap break-words max-w-[340px]">{n.text}</div>
+                            <div className="[font-family:'Oxygen',Helvetica] text-xs text-gray-500 mt-1">
+                              {(() => {
+                                const name = n.created_by_name || 'Unknown User';
+                                const hasDr = /^Dr\.?/i.test(name.trim());
+                                const prefixed = hasDr ? name : `Dr. ${name}`;
+                                return prefixed + (n.created_at ? ` • ${n.created_at.toLocaleString('en-US')}` : '');
+                              })()}
+                            </div>
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              className="p-1 rounded hover:bg-green-50 text-green-600"
+                              title="Mark as read"
+                              onClick={() => markNoteAsRead(n.id)}
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                                <path fillRule="evenodd" d="M16.704 5.29a1 1 0 00-1.408-1.42L8.25 10.955 5.7 8.4a1 1 0 10-1.4 1.428l3.25 3.186a1 1 0 001.404-.006l7.75-7.72z" clipRule="evenodd" />
+                              </svg>
+                            </button>
                             <button
                               className="p-1 rounded hover:bg-gray-100 text-gray-600"
                               title="Edit"

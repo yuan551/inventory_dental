@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import monthlyUsageIcon from "../../assets/dashboard/monthly usage.png";
 import { Card, CardContent } from "../../components/ui/card";
 import { DashboardSidebarSection } from "./sections/DashboardSidebarSection/DashboardSidebarSection";
 import { InventoryOverviewSection } from "./sections/InventoryOverviewSection/InventoryOverviewSection";
@@ -9,6 +10,7 @@ import { StockAlertsListSection } from "./sections/StockAlertsListSection/StockA
 import { StockAlertsSection } from "./sections/StockAlertsSection/StockAlertsSection";
 import { AppHeader } from "../../components/layout/AppHeader";
 import { collection, getDocs, query, where, orderBy } from "firebase/firestore";
+import { isPlaceholderDoc } from "../../lib/placeholders";
 import { db } from "../../firebase";
 
 export const DashboardModule = () => {
@@ -26,8 +28,8 @@ export const DashboardModule = () => {
   const [items, setItems] = useState([]); // unified list across categories
 
   useEffect(() => {
-    const TTL_MS = 60 * 1000;
-    const CACHE_KEY = 'dashboard_inventory_cache_v1';
+  const TTL_MS = 60 * 1000;
+  const CACHE_KEY = 'dashboard_inventory_cache_v2'; // bumped to flush placeholder remnants
     const tryLoadCache = () => {
       try {
         const raw = sessionStorage.getItem(CACHE_KEY);
@@ -63,7 +65,8 @@ export const DashboardModule = () => {
       const name = data.item_name || data.name || '';
       const unit_cost = Number(data.unit_cost || 0);
       const exp = parseDate(data.expired_date || data.expiration || data.expiration_date);
-      return { id: d.id, name, quantity, unit, unit_cost, expiration: exp, category };
+      const status = data.status || null;
+      return { id: d.id, name, quantity, unit, unit_cost, expiration: exp, category, status };
     };
 
     const load = async () => {
@@ -73,7 +76,9 @@ export const DashboardModule = () => {
       try {
         const cols = ['consumables', 'medicines', 'equipment'];
         const snaps = await Promise.all(cols.map((c) => getDocs(collection(db, c))));
-        const all = snaps.flatMap((snap, i) => snap.docs.map((d) => mapDoc(d, cols[i])));
+        const all = snaps.flatMap((snap, i) => snap.docs
+          .filter(d => !isPlaceholderDoc(d.id, d.data()))
+          .map((d) => mapDoc(d, cols[i])));
         setItems(all);
         saveCache(all);
       } catch (e) {
@@ -91,19 +96,38 @@ export const DashboardModule = () => {
   const now = new Date();
   const in30 = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
 
-  const lowStockCount = useMemo(() => items.filter((it) => it.quantity < threshold).length, [items]);
-  const expiringSoonCount = useMemo(() => items.filter((it) => it.expiration && it.expiration <= in30 && it.expiration >= now).length, [items]);
-  const totalValue = useMemo(() => items.reduce((sum, it) => sum + (Number(it.unit_cost || 0) * Number(it.quantity || 0)), 0), [items]);
+  // Defensive filter (in case cache still held a placeholder before code update)
+  const realItems = useMemo(() => items.filter(it => it && it.id !== 'dummy' && (it.name || it.quantity > 0)), [items]);
+  const lowStockCount = useMemo(() => realItems.filter((it) => it.quantity < threshold).length, [realItems]);
+  const expiringSoonCount = useMemo(() => realItems.filter((it) => it.expiration && it.expiration <= in30 && it.expiration >= now).length, [realItems]);
+  const totalValue = useMemo(() => realItems.reduce((sum, it) => sum + (Number(it.unit_cost || 0) * Number(it.quantity || 0)), 0), [realItems]);
 
   const alerts = useMemo(() => {
-    return items.reduce((acc, it) => {
-      const reasons = [];
-      if (it.quantity < threshold) reasons.push(`Low Stock - ${it.quantity} ${it.unit}`);
-      if (it.expiration && it.expiration <= in30 && it.expiration >= now) reasons.push(`Expiring Soon - ${it.expiration.toLocaleDateString('en-US')}`);
-      if (reasons.length) acc.push({ item: it.name || '(Unnamed)', reason: reasons.join(' • '), category: it.category });
+    return realItems.reduce((acc, it) => {
+      let severity = null;
+      if (it.status === 'Critical' || it.status === 'Low Stock') {
+        severity = it.status;
+      } else if (!it.status) { // fallback if status missing
+        if (it.quantity <= 20) severity = 'Critical';
+        else if (it.quantity <= 60) severity = 'Low Stock';
+      }
+      if (severity) {
+        acc.push({
+          item: it.name || '(Unnamed)',
+          reason: `${severity} - ${it.quantity} ${it.unit}`,
+          category: it.category,
+          severity,
+          quantity: it.quantity,
+        });
+      }
       return acc;
-    }, []);
-  }, [items]);
+    }, []).sort((a,b) => {
+      const order = { 'Critical':0,'Low Stock':1 };
+      const ret = order[a.severity]-order[b.severity];
+      if (ret!==0) return ret;
+      return a.quantity - b.quantity;
+    });
+  }, [items, realItems]);
 
   // Monthly usage trend from 'stock_logs' (type='stock_out')
   const [trendSeries, setTrendSeries] = useState([]);
@@ -199,30 +223,31 @@ export const DashboardModule = () => {
         <AppHeader title="DASHBOARD" subtitle="Welcome back, Dr. Johnson. Here's your clinic's inventory overview." />
 
         {/* Content Area */}
-  <div className="flex-1 px-8 py-6 overflow-y-auto" style={{backgroundColor: '#F5F5F5'}}>
+  <div className="flex-1 flex flex-col px-8 py-6 overflow-hidden" style={{backgroundColor: '#F5F5F5'}}>
 
-          <div className="grid grid-cols-4 gap-4 mb-6">
+          <div className="grid grid-cols-4 gap-4 mb-6 flex-shrink-0">
             <LowStockItemsSection count={lowStockCount} />
             <StockAlertsSection count={expiringSoonCount} />
             <PendingOrdersSection count={0} />
             <InventoryOverviewSection totalValue={totalValue} />
           </div>
-
           <div className="grid grid-cols-3 gap-6 flex-1 min-h-0">
-            <Card className="col-span-2 bg-white rounded-xl shadow-sm border border-gray-200">
-              <CardContent className="p-6">
-                <h2 className="[font-family:'Oxygen',Helvetica] font-bold text-gray-900 text-xl tracking-[0] leading-[normal] mb-4">
+            {/* Monthly Usage Trend (takes 2 columns) */}
+            <Card className="col-span-2 bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col min-h-0">
+              <CardContent className="p-6 flex flex-col flex-1 min-h-0">
+                <h2 className="[font-family:'Oxygen',Helvetica] font-bold text-gray-900 text-xl tracking-[0] leading-[normal] mb-4 flex items-center gap-2 flex-shrink-0">
+                  <img src={monthlyUsageIcon} alt="Monthly Usage" className="w-5 h-5 object-contain" />
                   Monthly Usage Trend
                 </h2>
-                <div className="h-64">
+                <div className="flex-1 min-h-0">
                   <MonthlyUsageTrendSection series={trendSeries} months={trendMonths} />
                 </div>
-
               </CardContent>
             </Card>
 
-            <Card className="bg-white rounded-xl shadow-sm border border-gray-200">
-              <CardContent className="p-0 h-full">
+            {/* Stock Alerts List */}
+            <Card className="bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col min-h-0">
+              <CardContent className="p-0 h-full flex flex-col min-h-0">
                 <StockAlertsListSection alerts={alerts} />
               </CardContent>
             </Card>
@@ -232,3 +257,6 @@ export const DashboardModule = () => {
     </div>
   );
 };
+
+// Provide default export alongside named export for compatibility with any default imports
+export default DashboardModule;

@@ -57,9 +57,9 @@ export const LoginModule = () => {
     }
   };
   return (
-    <div className="bg-white h-screen w-full flex overflow-hidden">
-      {/* Left side - Login Form */}
-      <div className="flex-1 flex flex-col justify-center px-8 lg:px-16 xl:px-24 max-w-2xl overflow-y-auto">
+  <div className="bg-white h-screen w-full flex overflow-hidden relative">
+      {/* Left side - Login Form (50%) */}
+      <div className="w-full lg:w-1/2 box-border flex flex-col justify-center px-8 lg:px-16 xl:px-24 overflow-y-auto">
         <div className="w-full max-w-md mx-auto lg:mx-0 py-8">
           <h1 className="[font-family:'Inter',Helvetica] font-extrabold text-[#00b7c2] text-4xl lg:text-5xl mb-6">
             Login
@@ -139,8 +139,11 @@ export const LoginModule = () => {
         </div>
       </div>
 
-      {/* Right side - Dental Clinic Branding */}
-      <div className="hidden lg:flex flex-1 bg-[#00b7c2] relative overflow-hidden">
+  {/* Optional vertical divider for visual balance */}
+  <div className="hidden lg:block absolute top-0 bottom-0 left-1/2 w-px bg-[#e5e7eb] z-10 pointer-events-none" />
+
+  {/* Right side - Branding (50%) */}
+  <div className="hidden lg:flex w-1/2 box-border bg-[#00b7c2] relative overflow-hidden">
         {/* Background decorative circles */}
         <div className="absolute -top-32 -left-16 w-80 h-80 bg-[#ffffff1a] rounded-full"></div>
         <div className="absolute -bottom-32 -right-16 w-80 h-80 bg-[#ffffff1a] rounded-full"></div>

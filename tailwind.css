@@ -118,6 +118,16 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Custom dropdown open animation */
+@keyframes dropdown-scale-fade {
+  0% { opacity: 0; transform: translateY(-6px) scale(0.98); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.dropdown-anim-in {
+  animation: dropdown-scale-fade 140ms ease-out both;
+}
+
 @layer base {
   :root {
     --background: 0 0% 100%;
@@ -195,4 +205,35 @@
     @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
   }
+}
+
+/* Custom scrollbar styles for table */
+.overflow-y-auto::-webkit-scrollbar {
+  width: 8px;
+}
+
+.overflow-y-auto::-webkit-scrollbar-track {
+  background: #f0f0f0;
+  border-radius: 10px;
+}
+
+.overflow-y-auto::-webkit-scrollbar-thumb {
+  background: #00B6C9;
+  border-radius: 10px;
+}
+
+.overflow-y-auto::-webkit-scrollbar-thumb:hover {
+  background: #008fa0;
+}
+
+/* Hide number input spinners (Chrome, Edge, Safari) */
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+/* Hide number input spinners (Firefox) */
+input[type=number] {
+  -moz-appearance: textfield;
+  appearance: textfield;
 }
