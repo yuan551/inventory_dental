@@ -1,8 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { signOut } from "firebase/auth";
-import { auth } from "../../../../firebase";
-import { ChevronLeft, ChevronRight, LogOut as LogOutIcon } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
 // Import icons from assets
 import dashboardIcon from "../../../../assets/dashboard.png";
@@ -36,14 +34,7 @@ export const DashboardSidebarSection = ({ currentPage = "DASHBOARD" }) => {
     } catch {}
   }, [collapsed]);
 
-  const handleLogout = async () => {
-    try {
-      await signOut(auth);
-      navigate("/");
-    } catch (error) {
-      console.error("Logout error:", error);
-    }
-  };
+  // Logout is handled from the profile dropdown in the header; sidebar no longer contains logout controls.
 
   const handleNavigation = (itemName) => {
     const routes = {
@@ -141,20 +132,7 @@ export const DashboardSidebarSection = ({ currentPage = "DASHBOARD" }) => {
       </nav>
 
       {/* Bottom Section */}
-      <div className="p-4 border-t border-white/10">
-        <button
-          onClick={handleLogout}
-          className={`w-full bg-white/20 hover:bg-white/30 text-white rounded-lg transition-colors [font-family:'Inter',Helvetica] font-medium ${collapsed ? "py-2 px-0 flex items-center justify-center" : "py-2 px-3 text-sm"}`}
-          title="Logout"
-          aria-label="Logout"
-        >
-          {collapsed ? (
-            <LogOutIcon className="w-5 h-5" />
-          ) : (
-            "Logout"
-          )}
-        </button>
-      </div>
+      <div className="p-4 border-t border-white/10" />
     </div>
   );
 };

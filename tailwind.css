@@ -222,23 +222,24 @@
   }
 }
 
-/* Custom scrollbar styles for table */
+/* Custom vertical scrollbar styles for elements using overflow-y-auto */
 .overflow-y-auto::-webkit-scrollbar {
-  width: 8px;
+  width: 10px;
 }
 
 .overflow-y-auto::-webkit-scrollbar-track {
-  background: #f0f0f0;
-  border-radius: 10px;
+  background: #f5f7f8;
+  border-radius: 999px;
 }
 
 .overflow-y-auto::-webkit-scrollbar-thumb {
-  background: #00B6C9;
-  border-radius: 10px;
+  background: #00b7c2; /* primary teal */
+  border-radius: 999px;
+  border: 2px solid #f5f7f8; /* create padding effect */
 }
 
 .overflow-y-auto::-webkit-scrollbar-thumb:hover {
-  background: #008fa0;
+  background: #009ba5;
 }
 
 /* Hide number input spinners (Chrome, Edge, Safari) */
