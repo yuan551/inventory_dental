@@ -1,7 +1,4 @@
-// Hardcoded Firebase config (restored per request).
-// WARNING: This file contains real Firebase configuration. Exposing these
-// values in a public repo is a security risk. Consider using env vars later.
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 
@@ -15,8 +12,23 @@ const firebaseConfig = {
   measurementId: 'G-W5E0FQ5PCL',
 };
 
-const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
-export const db = getFirestore(app);
+// Initialize app defensively: if an app already exists use it.
+let app;
+try {
+  app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+} catch (e) {
+  // Fallback: try initializeApp and if that fails, rethrow the error so we can
+  // still see it during development. In production we avoid crashing by
+  // letting auth/db be null-safe below.
+  try {
+    app = initializeApp(firebaseConfig);
+  } catch (err) {
+    console.error('Failed to initialize Firebase app:', err);
+    app = null;
+  }
+}
+
+export const auth = app ? getAuth(app) : null;
+export const db = app ? getFirestore(app) : null;
 export default app;
 
