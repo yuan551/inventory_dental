@@ -59,8 +59,8 @@ export const LoginModule = () => {
   return (
   <div className="bg-white h-screen w-full flex overflow-hidden relative">
       {/* Left side - Login Form (50%) */}
-      <div className="w-full lg:w-1/2 box-border flex flex-col justify-center px-8 lg:px-16 xl:px-24 overflow-y-auto">
-        <div className="w-full max-w-md mx-auto lg:mx-0 py-8">
+      <div className="w-full lg:w-1/2 box-border flex flex-col justify-center items-center px-8 lg:px-16 xl:px-24 overflow-y-auto">
+        <div className="w-full max-w-md mx-auto py-8">
           <h1 className="[font-family:'Inter',Helvetica] font-extrabold text-[#00b7c2] text-4xl lg:text-5xl mb-6">
             Login
           </h1>
@@ -149,27 +149,26 @@ export const LoginModule = () => {
         <div className="absolute -bottom-32 -right-16 w-80 h-80 bg-[#ffffff1a] rounded-full"></div>
         
         {/* Main content */}
-        <div className="relative z-10 flex flex-col items-center justify-center h-full w-full px-8">
+  <div className="relative z-10 flex flex-col items-center justify-between h-full w-full px-8 pt-8">
           {/* Logo and clinic name */}
-          <div className="mb-8">
-            <div className="flex items-center justify-center mb-4">
+          <div className="mt-28 mb-2">
+            <div className="flex items-center justify-center mb-1 space-x-2">
               <img
-                className="w-16 h-16 mr-4"
+                className="w-16 h-16 mr-3"
                 alt="Group"
                 src="/group.png"
               />
               <div className="[font-family:'Inter',Helvetica] text-white">
-                <span className="font-bold text-4xl xl:text-5xl tracking-[6.14px]">MEDI</span>
-                <span className="text-4xl xl:text-5xl tracking-[6.14px]">CARE</span>
+                <div className="inline-block text-left mx-auto">
+                  <div className="font-bold text-4xl xl:text-5xl tracking-[4px]">MEDICARE</div>
+                  <div className="font-semibold text-white text-sm xl:text-base tracking-[2px] mt-1">DENTAL CLINIC</div>
+                </div>
               </div>
-            </div>
-            <div className="[font-family:'Inter',Helvetica] font-semibold text-white text-lg xl:text-xl tracking-[3.00px] text-center">
-              DENTAL CLINIC
             </div>
           </div>
 
-          {/* Doctor image */}
-          <div className="relative flex-1 flex items-center">
+          {/* Doctor image (anchored to bottom so it fits flush) */}
+          <div className="absolute bottom-0 left-0 right-0 flex justify-center items-end overflow-hidden pointer-events-none">
             <img
               className="w-full max-w-md xl:max-w-lg object-contain"
               alt="Dental Professional"

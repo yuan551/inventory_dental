@@ -14,7 +14,7 @@ export const StockAlertsSection = ({ count = 0 }) => {
             <div className="[font-family:'Inter',Helvetica] font-bold text-gray-900 text-2xl mb-1">
               {count}
             </div>
-            <div className="[font-family:'Oxygen',Helvetica] font-normal text-gray-500 text-xs">
+            <div className="[font-family:'Oxygen',Helvetica] font-normal text-gray-500 text-[10px]">
               Next 30 days
             </div>
           </div>

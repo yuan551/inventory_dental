@@ -15,7 +15,7 @@ export const InventoryOverviewSection = ({ totalValue = 0 }) => {
             <div className="[font-family:'Inter',Helvetica] font-bold text-gray-900 text-2xl mb-1">
               {formatted}
             </div>
-            <div className="[font-family:'Oxygen',Helvetica] font-normal text-gray-500 text-xs">
+            <div className="[font-family:'Oxygen',Helvetica] font-normal text-gray-500 text-[10px]">
               Total inventory value
             </div>
           </div>
