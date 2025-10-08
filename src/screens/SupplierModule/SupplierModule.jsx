@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { DashboardSidebarSection } from "../DashboardModule/sections/DashboardSidebarSection/DashboardSidebarSection";
 import { AppHeader } from "../../components/layout/AppHeader";
+import { db } from "../../firebase";
+import { collection, getDocs, onSnapshot } from "firebase/firestore";
 import Users from "../../assets/Users.png";
 import mark_email_unread from "../../assets/mark_email_unread.png";
 import PhoneIcon from "../../assets/PhoneIcon.png";
@@ -67,6 +69,80 @@ export const SupplierModule = () => {
       return false;
     }
   });
+
+  const [consumablesOrders, setConsumablesOrders] = useState([]);
+  const [medicinesOrders, setMedicinesOrders] = useState([]);
+  const [equipmentOrders, setEquipmentOrders] = useState([]);
+  const [orders, setOrders] = useState([]);
+
+  useEffect(() => {
+    const unsubConsumables = onSnapshot(
+      collection(db, "consumables"),
+      (snap) => {
+        setConsumablesOrders(
+          snap.docs.map((doc) => {
+            const data = doc.data();
+            return {
+              id: doc.id,
+              item: data.item_name || data.name || "",
+              quantity: `${data.quantity || 0} ${
+                data.units || data.unit || ""
+              }`,
+              supplier: data.supplier || "",
+              unitCost: `₱${Number(data.unit_cost || 0).toFixed(2)}`,
+              status: data.status || "",
+              expiration: data.expiration || data.expiration_date || "—",
+              category: "consumables",
+            };
+          })
+        );
+      }
+    );
+    const unsubMedicines = onSnapshot(collection(db, "medicines"), (snap) => {
+      setMedicinesOrders(
+        snap.docs.map((doc) => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            item: data.item_name || data.name || "",
+            quantity: `${data.quantity || 0} ${data.units || data.unit || ""}`,
+            supplier: data.supplier || "",
+            unitCost: `₱${Number(data.unit_cost || 0).toFixed(2)}`,
+            status: data.status || "",
+            expiration: data.expiration || data.expiration_date || "—",
+            category: "medicines",
+          };
+        })
+      );
+    });
+    const unsubEquipment = onSnapshot(collection(db, "equipment"), (snap) => {
+      setEquipmentOrders(
+        snap.docs.map((doc) => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            item: data.item_name || data.name || "",
+            quantity: `${data.quantity || 0} ${data.units || data.unit || ""}`,
+            supplier: data.supplier || "",
+            unitCost: `₱${Number(data.unit_cost || 0).toFixed(2)}`,
+            status: data.status || "",
+            expiration: data.expiration || data.expiration_date || "—",
+            category: "equipment",
+          };
+        })
+      );
+    });
+    return () => {
+      unsubConsumables();
+      unsubMedicines();
+      unsubEquipment();
+    };
+  }, []);
+
+  useEffect(() => {
+    setOrders([...consumablesOrders, ...medicinesOrders, ...equipmentOrders]);
+  }, [consumablesOrders, medicinesOrders, equipmentOrders]);
+
   const [activeTab, setActiveTab] = useState("directory");
 
   const [showForm, setShowForm] = useState(false);
@@ -935,38 +1011,75 @@ export const SupplierModule = () => {
                   <span>
                     <img src={Boxx} className="inline-block w-7 h-7 mr-2" />
                   </span>
-                  Purchase Orders{" "}
+                  All Inventory Orders{" "}
                   <span className="[font-family:'Oxygen',Helvetica] font-normal text-gray-500 text-lg">
-                    (1 Order)
+                    ({orders.length} Orders)
                   </span>
                 </h2>
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-sm">
-                    <thead>
-                      <tr className="text-left text-gray-500 border-b">
-                        <th className="py-2 pr-4 font-semibold">Order ID</th>
-                        <th className="py-2 pr-4 font-semibold">Item Name</th>
-                        <th className="py-2 pr-4 font-semibold">Quantity</th>
-                        <th className="py-2 pr-4 font-semibold">Supplier</th>
-                        <th className="py-2 pr-4 font-semibold">
-                          Date Delivered
+                <div className="overflow-hidden rounded-xl border border-gray-200 shadow-sm">
+                  <table className="w-full">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-6 py-4 text-left [font-family:'Inter',Helvetica] font-medium text-gray-700 text-sm">
+                          Order ID
                         </th>
-                        <th className="py-2 pr-4 font-semibold">Total Cost</th>
+                        <th className="px-6 py-4 text-left [font-family:'Inter',Helvetica] font-medium text-gray-700 text-sm">
+                          Item Name
+                        </th>
+                        <th className="px-6 py-4 text-left [font-family:'Inter',Helvetica] font-medium text-gray-700 text-sm">
+                          Quantity
+                        </th>
+                        <th className="px-6 py-4 text-left [font-family:'Inter',Helvetica] font-medium text-gray-700 text-sm">
+                          Supplier
+                        </th>
+                        <th className="px-6 py-4 text-left [font-family:'Inter',Helvetica] font-medium text-gray-700 text-sm">
+                          Unit Cost
+                        </th>
+                        <th className="px-6 py-4 text-left [font-family:'Inter',Helvetica] font-medium text-gray-700 text-sm">
+                          Status
+                        </th>
+                        <th className="px-6 py-4 text-left [font-family:'Inter',Helvetica] font-medium text-gray-700 text-sm">
+                          Expiration
+                        </th>
+                        <th className="px-6 py-4 text-left [font-family:'Inter',Helvetica] font-medium text-gray-700 text-sm">
+                          Category
+                        </th>
                       </tr>
                     </thead>
-                    <tbody className="text-gray-900">
-                      <tr className="border-b hover:bg-blue-50 transition">
-                        <td className="py-4 pr-4 align-top font-medium">
-                          PO-2024-0156
-                        </td>
-                        <td className="py-4 pr-4 align-top">
-                          Latex Gloves, Dental Masks
-                        </td>
-                        <td className="py-4 pr-4 align-top">—</td>
-                        <td className="py-4 pr-4 align-top">MedSupply Co.</td>
-                        <td className="py-4 pr-4 align-top">9/20/2024</td>
-                        <td className="py-4 pr-4 align-top">$245.00</td>
-                      </tr>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {orders.map((order, index) => (
+                        <tr
+                          key={order.id}
+                          className={`transition-colors ${
+                            index === 0 ? "bg-[#E6F7F9]" : "hover:bg-gray-50"
+                          }`}
+                        >
+                          <td className="px-6 py-4 [font-family:'Inter',Helvetica] font-medium text-gray-900">
+                            {order.id}
+                          </td>
+                          <td className="px-6 py-4 [font-family:'Inter',Helvetica] text-gray-900">
+                            {order.item}
+                          </td>
+                          <td className="px-6 py-4 [font-family:'Inter',Helvetica] text-gray-900">
+                            {order.quantity}
+                          </td>
+                          <td className="px-6 py-4 [font-family:'Inter',Helvetica] text-gray-900">
+                            {order.supplier}
+                          </td>
+                          <td className="px-6 py-4 [font-family:'Inter',Helvetica] font-medium text-gray-900">
+                            {order.unitCost}
+                          </td>
+                          <td className="px-6 py-4 [font-family:'Inter',Helvetica] text-gray-900">
+                            {order.status}
+                          </td>
+                          <td className="px-6 py-4 [font-family:'Inter',Helvetica] text-gray-900">
+                            {order.expiration}
+                          </td>
+                          <td className="px-6 py-4 [font-family:'Inter',Helvetica] text-gray-900 capitalize">
+                            {order.category}
+                          </td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>
