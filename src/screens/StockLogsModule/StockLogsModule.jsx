@@ -68,10 +68,13 @@ export const StockLogsModule = () => {
         }
     });
     const [tab, setTab] = useState("in");
+    // Inner sub-tab for Stock In separation (Ordered vs Stock In/Received)
+    const [subTab, setSubTab] = useState("ordered"); // 'ordered' | 'stockin'
     const [showStatusDropdown, setShowStatusDropdown] = useState(false);
     const [selectedStatus, setSelectedStatus] = useState("All Status");
     const [showExportModal, setShowExportModal] = useState(false);
     const [logs, setLogs] = useState([]);
+    const [stockInLogs, setStockInLogs] = useState([]);
     const [outLogs, setOutLogs] = useState([]);
     const [accountsMap, setAccountsMap] = useState({});
     const [openStatusFor, setOpenStatusFor] = useState(null);
@@ -188,6 +191,23 @@ export const StockLogsModule = () => {
         return () => unsubscribe();
     }, []);
 
+    // Load restock logs from "stock_in" collection (explicit restock entries)
+    useEffect(() => {
+        const col = collection(db, "stock_in");
+        const q = query(col, orderBy("created_at", "desc"));
+        const unsub = onSnapshot(q, (snap) => {
+            const arr = [];
+            snap.forEach((docSnap) => {
+                const data = docSnap.data();
+                if (docSnap.id !== 'dummy' && !data.placeholder) {
+                    arr.push({ id: docSnap.id, ...data });
+                }
+            });
+            setStockInLogs(arr);
+        });
+        return () => unsub();
+    }, []);
+
     // Load Stock Out logs from "stock_logs" collection (uses 'timestamp' field instead of 'created_at')
     useEffect(() => {
         const logsCol = collection(db, "stock_logs");
@@ -221,11 +241,20 @@ export const StockLogsModule = () => {
         return () => document.removeEventListener("mousedown", handler);
     }, [openStatusFor]);
 
-    // Determine which logs to show based on tab
+    // Determine base rows by top-level tab
     const activeRows = tab === "out" ? outLogs : logs;
+    // Apply inner sub-tab filter only for Stock In
+    // - 'ordered' subTab: show ALL ordered logs regardless of status
+    // - 'stockin' subTab: show only explicit stock_in documents (restock logs)
+    const modeRows = (() => {
+        if (tab !== 'in') return activeRows;
+        if (subTab === 'ordered') return activeRows; // show 'ordered' collection items
+        // stockin subTab: use separate stockInLogs collection
+        return stockInLogs;
+    })();
 
     // Filter logs by status and search
-    const filteredLogs = activeRows.filter((log) => {
+    const filteredLogs = modeRows.filter((log) => {
         const matchesStatus =
             selectedStatus === "All Status" || log.status === selectedStatus;
         
@@ -440,6 +469,17 @@ export const StockLogsModule = () => {
                         (l.notes || '').toString(),
                     ];
                 }
+                if (subTab === 'stockin') {
+                    // Restock view: omit Status column
+                    return [
+                        dateStr,
+                        l.item_name || l.item || '',
+                        getUserFullName(l.created_by || l.createdBy),
+                        l.supplier || '',
+                        l.reference || '',
+                    ];
+                }
+                // Ordered view keeps Status column
                 return [
                     dateStr,
                     l.item_name || l.item || '',
@@ -450,9 +490,11 @@ export const StockLogsModule = () => {
                 ];
             });
 
-            const head = tab === 'out'
-                ? [["Date & Time", "Item", "User", "Supplier", "Reference", "Notes"]]
-                : [["Date & Time", "Item", "User", "Supplier", "Reference", "Status"]];
+            const head = (() => {
+                if (tab === 'out') return [["Date & Time", "Item", "User", "Supplier", "Reference", "Notes"]];
+                if (subTab === 'stockin') return [["Date & Time", "Item", "User", "Supplier", "Reference"]];
+                return [["Date & Time", "Item", "User", "Supplier", "Reference", "Status"]];
+            })();
             docPdf.autoTable({
                 head,
                 body: rows,
@@ -538,43 +580,53 @@ export const StockLogsModule = () => {
                             ? "border-[#D6E6EA] bg-white"
                             : "border-[#FDEBC8] bg-[#FEF6EC]"
                     }`}>
-                        <div className={`text-base mb-1 ${
-                            tab === "in" ? "text-gray-500" : "text-[#B0883B]"
-                        }`}>
-                            {tab === "in" ? "Stock In today" : "Stock Out today"}
-                        </div>
-                        <div className="flex items-center justify-between">
-                            <div className="text-3xl font-bold text-gray-900">
-                                {tab === "in"
-                                    ? activeRows.filter((log) => {
-                                          if (!log.created_at) return false;
-                                          const logDate =
-                                              log.created_at instanceof Timestamp
-                                                  ? fmtDate(log.created_at.toDate())
-                                                  : log.created_at.seconds
-                                                  ? fmtDate(new Date(log.created_at.seconds * 1000))
-                                                  : "";
-                                          return logDate === fmtDate(new Date());
-                                      }).length
-                                    : activeRows.filter((log) => {
-                                          if (!log.created_at) return false;
-                                          const logDate =
-                                              log.created_at instanceof Timestamp
-                                                  ? fmtDate(log.created_at.toDate())
-                                                  : log.created_at.seconds
-                                                  ? fmtDate(new Date(log.created_at.seconds * 1000))
-                                                  : "";
-                                          return logDate === fmtDate(new Date());
-                                      }).length}
-                            </div>
-                            <img src={tab === 'out' ? stockoutIcon : stockintodayIcon} alt={tab === 'out' ? 'Stock Out Today' : 'Stock In Today'} className="w-9 h-9" />
-                        </div>
+                                <div className={`text-base mb-1 ${
+                                    tab === "in" ? "text-gray-500" : "text-[#B0883B]"
+                                }`}>
+                                    {tab === "in" ? "Stock In today" : "Stock Out today"}
+                                </div>
+                                <div className="flex items-center justify-between">
+                                    <div className="text-3xl font-bold text-gray-900">
+                                        {(() => {
+                                            const isToday = (created_at) => {
+                                                if (!created_at) return false;
+                                                const d = created_at instanceof Timestamp
+                                                    ? created_at.toDate()
+                                                    : created_at.seconds
+                                                        ? new Date(created_at.seconds * 1000)
+                                                        : (typeof created_at === 'number' ? new Date(created_at) : null);
+                                                if (!d) return false;
+                                                return fmtDate(d) === fmtDate(new Date());
+                                            };
+
+                                            if (tab === 'in') {
+                                                // Stock In today should only track explicit stock_in (restock) transactions
+                                                return (stockInLogs || []).filter(l => isToday(l.created_at)).length;
+                                            }
+                                            // stock out uses activeRows (outLogs)
+                                            return (activeRows || []).filter((log) => {
+                                                if (!log.created_at) return false;
+                                                const logDate =
+                                                    log.created_at instanceof Timestamp
+                                                        ? fmtDate(log.created_at.toDate())
+                                                        : log.created_at.seconds
+                                                        ? fmtDate(new Date(log.created_at.seconds * 1000))
+                                                        : "";
+                                                return logDate === fmtDate(new Date());
+                                            }).length;
+                                        })()}
+                                    </div>
+                                    <img src={tab === 'out' ? stockoutIcon : stockintodayIcon} alt={tab === 'out' ? 'Stock Out Today' : 'Stock In Today'} className="w-9 h-9" />
+                                </div>
                     </div>
                     {/* Total Transactions Card */}
                     <div className="bg-white rounded-xl border border-[#D6E6EA] p-6 flex flex-col justify-between min-h-[110px]">
                         <div className="text-gray-500 text-base mb-1">Total Transactions</div>
                         <div className="flex items-center justify-between">
-                            <div className="text-3xl font-bold text-gray-900">{activeRows.length}</div>
+                            <div className="text-3xl font-bold text-gray-900">{(() => {
+                                if (tab === 'in') return ((logs || []).length + (stockInLogs || []).length);
+                                return activeRows.length;
+                            })()}</div>
                             <img src={totaltransactionIcon} alt="Total Transactions" className="w-9 h-9" />
                         </div>
                     </div>
@@ -582,9 +634,29 @@ export const StockLogsModule = () => {
 
                 {/* Table Header & Controls */}
                 <div className="bg-white rounded-2xl shadow border border-gray-200 p-4 md:p-6 mt-2 mx-2 md:mx-8">
-                    <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-4 md:mb-6 gap-2">
-                        <div className="font-semibold text-gray-900 text-lg md:text-xl mb-2 md:mb-0 font-sans">
-                            Transaction Tracker ({filteredLogs.length} items)
+                    <div className="flex flex-col md:flex-row md:items-start md:justify-between mb-4 md:mb-6 gap-4">
+                        <div className="flex flex-col gap-2 font-sans">
+                            <div className="font-semibold text-gray-900 text-lg md:text-xl">
+                                Transaction Tracker ({filteredLogs.length} items)
+                            </div>
+                            {tab === 'in' && (
+                                <div className="flex gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setSubTab('ordered')}
+                                        className={`px-4 py-2 rounded-full text-sm font-medium transition border ${subTab === 'ordered' ? 'bg-[#00B6C9] text-white border-[#00B6C9]' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
+                                    >
+                                        Ordered
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setSubTab('stockin')}
+                                        className={`px-4 py-2 rounded-full text-sm font-medium transition border ${subTab === 'stockin' ? 'bg-[#00B6C9] text-white border-[#00B6C9]' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
+                                    >
+                                        Stock In
+                                    </button>
+                                </div>
+                            )}
                         </div>
                         <div className="flex gap-2 md:gap-3">
                             {/* All Status Dropdown */}
@@ -662,7 +734,12 @@ export const StockLogsModule = () => {
                                     <th className="py-2 px-2 md:py-3 md:px-4 font-semibold">User</th>
                                     <th className="py-2 px-2 md:py-3 md:px-4 font-semibold">Supplier</th>
                                     <th className="py-2 px-2 md:py-3 md:px-4 font-semibold">Reference</th>
-                                    <th className="py-2 px-2 md:py-3 md:px-4 font-semibold">{tab === 'out' ? 'Notes' : 'Status'}</th>
+                                    { (tab === 'out') && (
+                                        <th className="py-2 px-2 md:py-3 md:px-4 font-semibold">Notes</th>
+                                    ) }
+                                    { (tab === 'in' && subTab !== 'stockin') && (
+                                        <th className="py-2 px-2 md:py-3 md:px-4 font-semibold">Status</th>
+                                    ) }
                                 </tr>
                             </thead>
                             <tbody>
@@ -705,10 +782,13 @@ export const StockLogsModule = () => {
                                             </td>
                                             <td className="py-2 px-2 md:py-3 md:px-4 align-top">{log.supplier || "N/A"}</td>
                                             <td className="py-2 px-2 md:py-3 md:px-4 align-top">{log.reference || "N/A"}</td>
-                                            <td className="py-2 px-2 md:py-3 md:px-4 align-top">
-                                                {tab === 'out' ? (
+                                            {tab === 'out' && (
+                                                <td className="py-2 px-2 md:py-3 md:px-4 align-top">
                                                     <div className="text-gray-600 text-sm max-w-xs break-words whitespace-pre-wrap">{log.notes || '—'}</div>
-                                                ) : (
+                                                </td>
+                                            )}
+                                            {tab === 'in' && subTab !== 'stockin' && (
+                                                <td className="py-2 px-2 md:py-3 md:px-4 align-top">
                                                     <div className="flex items-center gap-2">
                                                         {(() => {
                                                             const base = "inline-flex items-center gap-1 px-2 md:px-3 py-1 rounded-full text-xs font-semibold border select-none";
@@ -743,8 +823,8 @@ export const StockLogsModule = () => {
                                                             )}
                                                         </div>
                                                     </div>
-                                                )}
-                                            </td>
+                                                </td>
+                                            )}
                                         </tr>
                                     );
                                 })}

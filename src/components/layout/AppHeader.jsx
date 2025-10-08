@@ -1,15 +1,61 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Bell as BellIcon, Search as SearchIcon, AlertOctagon, AlertTriangle } from "lucide-react";
+import { useNavigate } from 'react-router-dom';
+import { signOut } from 'firebase/auth';
+import { Bell as BellIcon, Search as SearchIcon, AlertOctagon, AlertTriangle, ChevronDown as ChevronDownIcon } from "lucide-react";
 import { Input } from "../ui/input";
 import { Badge } from "../ui/badge";
 import { useLastName } from "../../hooks/useLastName";
 import profilePng from "../../assets/Ellipse 1.png";
 import { useAlerts } from "../../hooks/useAlerts";
+import { db, auth } from '../../firebase';
+import ConfirmModal from '../modals/ConfirmModal';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 export const AppHeader = ({ title, subtitle, searchPlaceholder = "Search inventory" }) => {
   const lastName = useLastName();
   const { alerts } = useAlerts();
   const [open, setOpen] = useState(false);
+  const [openProfile, setOpenProfile] = useState(false);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const navigate = useNavigate();
+
+  const closeLogoutModal = () => setShowLogoutModal(false);
+  const confirmLogout = async () => {
+    try {
+      await signOut(auth);
+      navigate('/');
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // pick a deterministic color for a given string
+  const pickColor = (s) => {
+    const palette = ['#F97316', '#06B6D4', '#84CC16', '#A78BFA', '#F43F5E', '#FB923C', '#38BDF8', '#34D399'];
+    if (!s) return palette[Math.floor(Math.random() * palette.length)];
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = (h << 5) - h + s.charCodeAt(i);
+    return palette[Math.abs(h) % palette.length];
+  };
+  const profileInitial = (lastName || 'U').charAt(0).toUpperCase();
+  const profileColor = pickColor(lastName || 'user');
+
+  // Persist avatarColor to accounts doc for the logged in user (if any)
+  useEffect(() => {
+    const persistColor = async () => {
+      try {
+        const user = auth.currentUser;
+        if (!user) return;
+        const accRef = doc(db, 'accounts', user.uid);
+        const snap = await getDoc(accRef);
+        const acc = snap.exists() ? snap.data() : {};
+        if (!acc || !acc.avatarColor) {
+          await setDoc(accRef, { ...(acc || {}), avatarColor: profileColor }, { merge: true });
+        }
+      } catch (e) { /* ignore errors */ }
+    };
+    persistColor();
+  }, [profileColor]);
 
   // Mark-as-read storage (local, per browser)
   const READ_KEY = 'read_alerts_v1';
@@ -27,6 +73,7 @@ export const AppHeader = ({ title, subtitle, searchPlaceholder = "Search invento
   const markAsRead = (a) => setReadMap((prev) => ({ ...prev, [keyFor(a)]: Date.now() }));
   const markAllAsRead = () => setReadMap((prev) => ({ ...prev, ...Object.fromEntries((alerts || []).map((a) => [keyFor(a), Date.now()])) }));
   return (
+    <>
     <header className="bg-white shadow-sm px-8 py-6 flex items-center justify-between border-b border-gray-200">
       <div>
         <h1 className="[font-family:'Inter',Helvetica] font-extrabold text-[#00b7c2] text-3xl tracking-[0] leading-[normal] mb-1">
@@ -55,21 +102,38 @@ export const AppHeader = ({ title, subtitle, searchPlaceholder = "Search invento
             aria-label="Notifications"
           >
             <BellIcon className={`w-6 h-6 ${open ? 'text-gray-800' : 'text-gray-600'}`} />
-            <Badge className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center p-0 animate-pulse">
-              <span className="[font-family:'Oxygen',Helvetica] font-normal text-white text-xs">{count}</span>
-            </Badge>
+            {count > 0 && (
+              <Badge className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center p-0 animate-pulse">
+                <span className="[font-family:'Oxygen',Helvetica] font-normal text-white text-xs">{count}</span>
+              </Badge>
+            )}
           </button>
           {/* Dropdown */}
           <div className={`${open ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-95 -translate-y-1 pointer-events-none'} absolute right-0 mt-2 w-80 bg-white rounded-xl border border-gray-200 shadow-[0_20px_40px_rgba(0,0,0,0.16)] transition-all duration-150 origin-top-right z-50`}
                onMouseLeave={() => setOpen(false)}>
             <div className="px-4 py-3 border-b border-gray-100">
-              <div className="[font-family:'Inter',Helvetica] text-gray-900 font-semibold text-sm">Notifications</div>
-              <div className="text-xs text-gray-500 flex items-center justify-between">
-                <span>{count} alert{count === 1 ? '' : 's'}</span>
-                {count > 0 && (
-                  <button onClick={markAllAsRead} className="text-[#00b7c2] hover:text-[#009ba5]">Mark all as read</button>
-                )}
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="[font-family:'Inter',Helvetica] text-gray-900 font-semibold text-sm">Notifications</div>
+                  <div className="text-xs text-gray-500">{count} alert{count === 1 ? '' : 's'}</div>
+                </div>
+                {/* Legend */}
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    <span className="inline-block w-3 h-3 rounded-full bg-red-500" />
+                    <span className="text-xs text-gray-600">Critical</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="inline-block w-3 h-3 rounded-full bg-amber-500" />
+                    <span className="text-xs text-gray-600">Low Stock</span>
+                  </div>
+                </div>
               </div>
+              {count > 0 && (
+                <div className="mt-2">
+                  <button onClick={markAllAsRead} className="text-[#00b7c2] hover:text-[#009ba5]">Mark all as read</button>
+                </div>
+              )}
             </div>
             <div className="max-h-72 overflow-auto divide-y divide-gray-100">
               {displayedAlerts.length === 0 ? (
@@ -77,15 +141,14 @@ export const AppHeader = ({ title, subtitle, searchPlaceholder = "Search invento
               ) : (
                 displayedAlerts.map((a, i) => {
                   const isRead = Boolean(readMap[keyFor(a)]);
-                  const icon = a.severity === 'Critical' ? (
-                    <AlertOctagon className={`w-5 h-5 ${isRead ? 'text-red-300' : 'text-red-500'}`} />
-                  ) : (
-                    <AlertTriangle className={`w-5 h-5 ${isRead ? 'text-amber-300' : 'text-amber-500'}`} />
-                  );
+                  // Replace per-alert icon with colored dot in the item line
+                  const iconDot = a.severity === 'Critical'
+                    ? <span className="inline-block w-3 h-3 rounded-full bg-red-500" />
+                    : <span className="inline-block w-3 h-3 rounded-full bg-amber-500" />;
                   return (
                     <div key={i} className={`px-4 py-3 transition-colors cursor-pointer ${isRead ? 'opacity-70 hover:bg-gray-50' : 'hover:bg-gray-50'}`}> 
                       <div className="flex items-start gap-3">
-                        <div className="mt-0.5">{icon}</div>
+                        <div className="mt-1.5">{iconDot}</div>
                         <div>
                           <div className="[font-family:'Inter',Helvetica] text-gray-900 text-sm font-medium flex items-center gap-2">
                             {a.item} <span className="text-xs text-gray-500">({a.category})</span>
@@ -116,19 +179,48 @@ export const AppHeader = ({ title, subtitle, searchPlaceholder = "Search invento
           </div>
         </div>
 
-        <div className="flex items-center gap-3 pl-4 border-l border-gray-200">
-          <img className="w-10 h-10 rounded-full border-2 border-gray-200 object-cover" alt="Profile" src={profilePng} />
-          <div>
-            <div className="[font-family:'Inter',Helvetica] font-semibold text-gray-900 text-sm tracking-[0] leading-[normal]">
-              {lastName ? `Dr. ${lastName}` : 'Dr. Giselle'}
+        <div className="flex items-center gap-3 pl-4 border-l border-gray-200 relative">
+          <button
+            onClick={() => setOpenProfile(v => !v)}
+            className="flex items-center gap-3 rounded-full p-1 hover:bg-gray-100 transition-colors"
+            aria-haspopup="true"
+            aria-expanded={openProfile}
+            aria-label="Profile menu"
+          >
+            <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold" style={{ background: profileColor }}>
+              {profileInitial}
             </div>
-            <div className="[font-family:'Oxygen',Helvetica] font-normal text-gray-500 text-xs tracking-[0] leading-[normal]">
-              ADMINISTRATOR
+            <div className="text-left">
+              <div className="[font-family:'Inter',Helvetica] font-semibold text-gray-900 text-sm tracking-[0] leading-[normal]">
+                {lastName ? `Dr. ${lastName}` : 'Dr. Giselle'}
+              </div>
+              <div className="[font-family:'Oxygen',Helvetica] font-normal text-gray-500 text-xs tracking-[0] leading-[normal]">
+                ADMINISTRATOR
+              </div>
             </div>
+            {/* dropdown indicator */}
+            <ChevronDownIcon className="w-4 h-4 text-gray-400" />
+          </button>
+
+          {/* Profile dropdown */}
+          <div className={`${openProfile ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-95 -translate-y-1 pointer-events-none'} absolute right-0 top-full mt-3 w-44 bg-white rounded-xl border border-gray-200 shadow-[0_20px_40px_rgba(0,0,0,0.08)] transition-all duration-150 origin-top-right z-50`}
+               onMouseLeave={() => setOpenProfile(false)}>
+            <button onClick={() => { setOpenProfile(false); setShowLogoutModal(true); }} className="w-full text-left px-4 py-3 hover:bg-gray-50">Logout</button>
           </div>
         </div>
       </div>
     </header>
+
+      <ConfirmModal
+        open={showLogoutModal}
+        title="Confirm Logout"
+        message="Are you sure you want to log out? You will be returned to the login screen."
+        onCancel={closeLogoutModal}
+        onConfirm={confirmLogout}
+        confirmText="Yes, Logout"
+        cancelText="Cancel"
+      />
+    </>
   );
 };
 

@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { signInWithEmailAndPassword } from "firebase/auth";
+import { signInWithEmailAndPassword, sendPasswordResetEmail } from "firebase/auth";
 import { auth } from "../../firebase";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -14,6 +14,11 @@ export const LoginModule = () => {
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [resetEmail, setResetEmail] = useState("");
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetMessage, setResetMessage] = useState("");
+  const [resetError, setResetError] = useState("");
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -56,7 +61,28 @@ export const LoginModule = () => {
       setLoading(false);
     }
   };
+
+  const handleSendReset = async () => {
+    setResetError('');
+    setResetMessage('');
+    const email = (resetEmail || '').trim();
+    if (!email) { setResetError('Please enter an email address.'); return; }
+    try {
+      setResetLoading(true);
+      await sendPasswordResetEmail(auth, email);
+      setResetMessage('If this account exists, a password reset email has been sent. Please check your inbox.');
+    } catch (err) {
+      console.error('Failed to send password reset', err);
+      const code = err?.code || '';
+      if (code === 'auth/invalid-email') setResetError('Invalid email address.');
+      else if (code === 'auth/user-not-found') setResetError('No account found with this email.');
+      else setResetError('Failed to send reset email. Try again later.');
+    } finally {
+      setResetLoading(false);
+    }
+  };
   return (
+  <>
   <div className="bg-white h-screen w-full flex overflow-hidden relative">
       {/* Left side - Login Form (50%) */}
       <div className="w-full lg:w-1/2 box-border flex flex-col justify-center items-center px-8 lg:px-16 xl:px-24 overflow-y-auto">
@@ -109,7 +135,7 @@ export const LoginModule = () => {
               </div>
 
               <div className="flex justify-end">
-                <button type="button" className="[font-family:'Oxygen',Helvetica] font-normal text-[#42424280] text-sm lg:text-base underline bg-transparent border-none cursor-pointer">
+                <button type="button" onClick={() => { setResetEmail(formData.email || ''); setShowResetModal(true); setResetMessage(''); setResetError(''); }} className="[font-family:'Oxygen',Helvetica] font-normal text-[#42424280] text-sm lg:text-base underline bg-transparent border-none cursor-pointer">
                   Forgot Password?
                 </button>
               </div>
@@ -177,6 +203,38 @@ export const LoginModule = () => {
           </div>
         </div>
       </div>
+  </div>
+  {/* Password Reset Modal */}
+  <div className={`${showResetModal ? 'opacity-100' : 'opacity-0 pointer-events-none'} fixed inset-0 z-[70] flex items-center justify-center transition-opacity duration-200`} onClick={() => setShowResetModal(false)}>
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" />
+      <div className={`relative z-10 w-[480px] max-w-[92vw] bg-white rounded-2xl border border-gray-200 shadow-[0_20px_50px_rgba(0,0,0,0.25)] transition-all duration-200 transform ${showResetModal ? 'scale-100 translate-y-0' : 'scale-95 translate-y-2'}`} onClick={(e) => e.stopPropagation()}>
+        <div className="rounded-t-2xl bg-[#00b7c2] text-white px-5 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-white/15 flex items-center justify-center">
+              <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none"><path d="M12 11v2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M17 11a5 5 0 10-10 0v3a2 2 0 002 2h6a2 2 0 002-2v-3z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </div>
+            <div className="text-lg font-semibold">Reset Password</div>
+          </div>
+          <button onClick={() => setShowResetModal(false)} className="p-1 rounded-full hover:bg-white/10 transition-colors" aria-label="Close">
+            <svg className="w-5 h-5 text-white" viewBox="0 0 20 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path fillRule="evenodd" d="M6.28 5.22a.75.75 0 011.06 0L10 7.88l2.66-2.66a.75.75 0 111.06 1.06L11.06 9l2.66 2.66a.75.75 0 11-1.06 1.06L10 10.12l-2.66 2.66a.75.75 0 11-1.06-1.06L8.94 9 6.28 6.34a.75.75 0 010-1.12z" clipRule="evenodd"/></svg>
+          </button>
+        </div>
+        <div className="px-6 pt-5 pb-6">
+          {resetMessage ? (
+            <div className="mb-4 p-3 bg-green-100 border border-green-400 text-green-700 rounded-lg">{resetMessage}</div>
+          ) : null}
+          {resetError ? (
+            <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-lg">{resetError}</div>
+          ) : null}
+          <label className="block text-sm text-gray-600 mb-2">Email</label>
+          <input value={resetEmail} onChange={(e) => setResetEmail(e.target.value)} className="w-full h-12 rounded-md border border-gray-300 px-3" placeholder="you@example.com" type="email" />
+          <div className="mt-4 flex justify-end gap-3">
+            <button onClick={() => setShowResetModal(false)} className="px-4 py-2 rounded-full bg-gray-100 hover:bg-gray-200">Cancel</button>
+            <button onClick={handleSendReset} disabled={resetLoading} className="px-4 py-2 rounded-full bg-[#00b7c2] text-white">{resetLoading ? 'Sending…' : 'Send Reset Email'}</button>
+          </div>
+        </div>
+      </div>
     </div>
+  </>
   );
 };

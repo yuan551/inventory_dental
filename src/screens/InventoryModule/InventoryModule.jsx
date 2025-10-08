@@ -2,7 +2,7 @@ import { Bell as BellIcon, Search as SearchIcon, Filter as FilterIcon, Package a
 import { collection, addDoc, getDocs, serverTimestamp, doc, writeBatch, updateDoc, deleteDoc, increment, Timestamp, getDoc } from "firebase/firestore";
 import { isPlaceholderDoc } from "../../lib/placeholders";
 import { db, auth } from "../../firebase";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -46,14 +46,31 @@ export const InventoryModule = () => {
   const [qaOpen, setQaOpen] = useState(false); // quick actions dropdown
   const [editMode, setEditMode] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
+  // store selected rows by document id (stable across tabs)
   const [selectedRows, setSelectedRows] = useState(new Set());
   const [isRestockOpen, setIsRestockOpen] = useState(false);
   const [restockItems, setRestockItems] = useState([]); // [{index, name, unit, addQty}]
   const [isStockOutOpen, setIsStockOutOpen] = useState(false);
   const [stockOutItems, setStockOutItems] = useState([]); // [{index, name, unit, currentQty, outQty, status}]
   const [stockOutNotes, setStockOutNotes] = useState(""); // shared note input for this stock out batch
+  const [perItemNotes, setPerItemNotes] = useState({}); // map id -> note text for per-item notes in stock out modal
+  const [noteTarget, setNoteTarget] = useState('ALL'); // 'ALL' or item id
+  const [noteOpen, setNoteOpen] = useState(false);
+  const noteRef = useRef(null);
+
+  // close dropdown on outside click
+  useEffect(() => {
+    if (!noteOpen) return;
+    const onDoc = (e) => {
+      if (!noteRef.current) return;
+      if (!noteRef.current.contains(e.target)) setNoteOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [noteOpen]);
   const [isStockOutSummaryOpen, setIsStockOutSummaryOpen] = useState(false);
   const [stockOutSummary, setStockOutSummary] = useState([]); // [{name,before,out,after}]
+  const [stockOutValidationMessage, setStockOutValidationMessage] = useState('');
   const [editedRows, setEditedRows] = useState({}); // pending inline edits per _id
 
   // Notes modal state
@@ -72,6 +89,12 @@ export const InventoryModule = () => {
   const handleQuantityChange = (e) => {
     const digitsOnly = e.target.value.replace(/[^0-9]/g, "");
     setQuantityValue(digitsOnly);
+  };
+
+  // Item name: allow letters, spaces, hyphen and apostrophe only (strip numbers/symbols)
+  const handleItemNameChange = (e) => {
+    const cleaned = e.target.value.replace(/[^A-Za-z\s\-\']/g, "");
+    setItemNameValue(cleaned);
   };
 
   const handleUnitCostChange = (e) => {
@@ -139,7 +162,8 @@ export const InventoryModule = () => {
       supplier: data.supplier || "",
       unitCost: `₱${Number(data.unit_cost || 0).toFixed(2)}`,
       status,
-      notesCount: Number(data.notes_count || 0),
+  // notes_count historically stored total notes; prefer unread_notes_count for the notification badge.
+  notesCount: Number(data.unread_notes_count ?? data.notes_count ?? 0),
       _id: d.id,
     };
   };
@@ -205,10 +229,9 @@ export const InventoryModule = () => {
     } catch (e) { console.error('Failed to force refetch for', tab, e); }
   };
 
-  // Clear selected rows when tab changes or select mode exits
-  useEffect(() => {
-    setSelectedRows(new Set());
-  }, [activeTab, selectMode]);
+  // Note: selection is kept across tabs now. We still clear selection when
+  // exiting select mode inside handleToggleSelect so there's no automatic
+  // reset on tab change.
   
   // Quick Actions: toggles and inline edit helpers
   const handleToggleEdit = async () => {
@@ -244,11 +267,12 @@ export const InventoryModule = () => {
       return next;
     });
   };
-  const toggleRowSelected = (index) => {
+  // Toggle selection using the stable document id
+  const toggleRowSelected = (id) => {
     setSelectedRows((prev) => {
       const next = new Set(prev);
-      if (next.has(index)) next.delete(index);
-      else next.add(index);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   };
@@ -302,7 +326,7 @@ export const InventoryModule = () => {
           else if (when.seconds) ts = new Date(when.seconds * 1000);
           else ts = new Date(when);
         }
-        return { id: d.id, text: data.text || '', created_at: ts, created_by: data.created_by || null, created_by_name: data.created_by_name || null };
+    return { id: d.id, text: data.text || '', created_at: ts, created_by: data.created_by || null, created_by_name: data.created_by_name || null, read: !!data.read };
       }).sort((a,b) => (b.created_at?.getTime?.()||0) - (a.created_at?.getTime?.()||0));
       setNotesList(list);
     } catch (e) {
@@ -312,6 +336,8 @@ export const InventoryModule = () => {
       setNotesLoading(false);
     }
   };
+
+  // (Per-item notes via dropdown in Stock Out modal, old per-row notes opener removed)
 
   const addNoteNow = async () => {
     const text = (newNote || '').trim();
@@ -340,14 +366,20 @@ export const InventoryModule = () => {
         created_at: serverTimestamp(),
         created_by: createdBy,
         created_by_name: createdByName,
+        read: false,
       });
       // Optimistic: prepend with local timestamp for now; it will match server shortly
-      const local = { id: ref.id, text, created_at: new Date(), created_by: createdBy, created_by_name: createdByName };
+      const local = { id: ref.id, text, created_at: new Date(), created_by: createdBy, created_by_name: createdByName, read: false };
       setNotesList((prev) => [local, ...prev]);
       setNewNote("");
-      // Increment parent notes_count in Firestore and locally
+  // If this note applies to an item currently in the stockOutItems list,
+  // attach the latest note text so confirmStockOut can include it in the log entry.
+  setStockOutItems(prev => prev.map(p => p.id === notesItem.id ? { ...p, lastNoteText: text } : p));
+  // Also store it in perItemNotes so the Stock Out modal dropdown shows it
+  setPerItemNotes(prev => ({ ...(prev || {}), [notesItem.id]: text }));
+      // Increment parent unread_notes_count in Firestore and locally (this controls the small badge)
       try {
-        await updateDoc(doc(db, notesItem.category, notesItem.id), { notes_count: increment(1) });
+        await updateDoc(doc(db, notesItem.category, notesItem.id), { unread_notes_count: increment(1) });
       } catch {}
       setDataMap((prev) => {
         const copy = { ...prev };
@@ -403,25 +435,30 @@ export const InventoryModule = () => {
     if (!noteId || !notesItem?.id) return;
     try {
       setIsDeletingNote(true);
+      // Check whether the note was unread to adjust counters
+      const local = (notesList || []).find(n => n.id === noteId);
+      const wasUnread = local ? !local.read : false;
       await deleteDoc(doc(db, notesItem.category, notesItem.id, 'notes', noteId));
       setNotesList((prev) => prev.filter((n) => n.id !== noteId));
-      // Decrement parent notes_count in Firestore and locally
-      try {
-        await updateDoc(doc(db, notesItem.category, notesItem.id), { notes_count: increment(-1) });
-      } catch {}
-      setDataMap((prev) => {
-        const copy = { ...prev };
-        const list = [...(copy[notesItem.category] || [])];
-        const idx = list.findIndex((r) => r._id === notesItem.id);
-        if (idx >= 0) {
-          const curr = list[idx];
-          const nextCount = Math.max(0, (curr.notesCount || 0) - 1);
-          list[idx] = { ...curr, notesCount: nextCount };
-          copy[notesItem.category] = list;
-          try { sessionStorage.setItem(getCacheKey(notesItem.category), JSON.stringify({ at: Date.now(), rows: list })); } catch {}
-        }
-        return copy;
-      });
+      // Decrement parent unread_notes_count in Firestore and locally if it was unread
+      if (wasUnread) {
+        try {
+          await updateDoc(doc(db, notesItem.category, notesItem.id), { unread_notes_count: increment(-1) });
+        } catch {}
+        setDataMap((prev) => {
+          const copy = { ...prev };
+          const list = [...(copy[notesItem.category] || [])];
+          const idx = list.findIndex((r) => r._id === notesItem.id);
+          if (idx >= 0) {
+            const curr = list[idx];
+            const nextCount = Math.max(0, (curr.notesCount || 0) - 1);
+            list[idx] = { ...curr, notesCount: nextCount };
+            copy[notesItem.category] = list;
+            try { sessionStorage.setItem(getCacheKey(notesItem.category), JSON.stringify({ at: Date.now(), rows: list })); } catch {}
+          }
+          return copy;
+        });
+      }
       setIsDeleteNoteOpen(false);
       setNoteToDelete(null);
     } catch (e) {
@@ -431,13 +468,23 @@ export const InventoryModule = () => {
     }
   };
 
-  // Mark-as-read: same effect as deleting but no confirmation modal; silent removal
-  const markNoteAsRead = async (noteId) => {
+  // Toggle read/unread for a note (no deletion). Keeps notes_count unchanged.
+  // Mark a note as read once. This is one-directional: once read, it cannot be marked unread through this control.
+  const toggleNoteRead = async (noteId) => {
     if (!noteId || !notesItem?.id) return;
     try {
-      await deleteDoc(doc(db, notesItem.category, notesItem.id, 'notes', noteId));
-      setNotesList((prev) => prev.filter((n) => n.id !== noteId));
-      try { await updateDoc(doc(db, notesItem.category, notesItem.id), { notes_count: increment(-1) }); } catch {}
+      const current = (notesList || []).find(n => n.id === noteId);
+      if (!current) return;
+      if (current.read) return; // already read - do nothing (only single click allowed)
+      // persist read flag and read_at timestamp
+      const payload = { read: true, read_at: serverTimestamp() };
+      await updateDoc(doc(db, notesItem.category, notesItem.id, 'notes', noteId), payload);
+      // update local list
+      setNotesList((prev) => prev.map((n) => (n.id === noteId ? { ...n, read: true } : n)));
+      // decrement parent unread_notes_count
+      try {
+        await updateDoc(doc(db, notesItem.category, notesItem.id), { unread_notes_count: increment(-1) });
+      } catch {}
       setDataMap((prev) => {
         const copy = { ...prev };
         const list = [...(copy[notesItem.category] || [])];
@@ -492,6 +539,16 @@ export const InventoryModule = () => {
 
   const [isSaving, setIsSaving] = useState(false);
 
+  // New Order validation: require item name, positive quantity, unit cost, supplier and unit
+  const isNewOrderValid = (() => {
+    const name = (itemNameValue || '').toString().trim();
+    const qty = Number((quantityValue || '').toString().trim() || 0);
+    const cost = (unitCostValue || '').toString().trim();
+    const supplier = (supplierValue || '').toString().trim();
+    const unit = (unitValue || '').toString().trim();
+    return name.length > 0 && qty > 0 && cost.length > 0 && supplier.length > 0 && unit.length > 0;
+  })();
+
   const handleSave = async () => {
     try {
       if (isSaving) return;
@@ -531,7 +588,21 @@ export const InventoryModule = () => {
       };
 
       // Save only to 'ordered' (Transaction Tracker). Inventory item will be created when status becomes 'Received'.
-      await addDoc(collection(db, "ordered"), payload);
+      // Use sequential IDs for ordered documents (e.g., 0001, 0002)
+      try {
+        // Create patterned random ID like "22-2232" for ordered docs
+        const createPattern = (await import('../../lib/idGen')).createPatternDoc;
+        await createPattern('ordered', payload, { leftDigits: 2, rightDigits: 4, separator: '-' });
+      } catch (e) {
+        console.warn('Failed to create ordered doc with patterned id, falling back to sequential or auto-id', e);
+        try {
+          const createSeq = (await import('../../lib/firestoreSeq')).createSequentialDoc;
+          await createSeq('ordered', payload, { counterId: 'ordered_counter', prefix: '', digits: 4 });
+        } catch (e2) {
+          console.warn('Sequential fallback failed, using default addDoc', e2);
+          await addDoc(collection(db, "ordered"), payload);
+        }
+      }
 
       // reset form
       setItemNameValue("");
@@ -608,52 +679,95 @@ export const InventoryModule = () => {
   // Helpers for restock modal
   const openRestock = () => {
     if (!selectMode || selectedRows.size === 0) return;
-    const list = Array.from(selectedRows).sort((a,b)=>a-b).map((idx) => {
-      const r = baseRows[idx];
-      const m = /^\s*(\d+)\s*(.*)$/.exec(r.quantity || "0 units");
-      const current = m ? parseInt(m[1], 10) : 0;
-      const unit = m ? (m[2] || "units").trim() : "units";
-      return { index: idx, name: r.item, unit, currentQty: current, addQty: 1 };
-    });
-    setRestockItems(list);
+    // Convert selected ids to the actual rows across categories
+    const ids = Array.from(selectedRows);
+    const list = ids.map((id) => {
+      // find the item in any category
+      for (const cat of Object.keys(dataMap)) {
+        const arr = dataMap[cat] || [];
+        const idx = arr.findIndex(r => r._id === id);
+        if (idx >= 0) {
+          const r = arr[idx];
+          const m = /^\s*(\d+)\s*(.*)$/.exec(r.quantity || "0 units");
+          const current = m ? parseInt(m[1], 10) : 0;
+          const unit = m ? (m[2] || "units").trim() : "units";
+          return { id, category: cat, index: idx, name: r.item, unit, currentQty: current, addQty: 1 };
+        }
+      }
+      return null;
+    }).filter(Boolean);
+    // dedupe by id in case the same id was somehow included multiple times
+    const seen = new Set();
+    const unique = [];
+    for (const it of list) {
+      if (!seen.has(it.id)) { seen.add(it.id); unique.push(it); }
+    }
+    setRestockItems(unique);
     setIsRestockOpen(true);
   };
 
-  const adjustRestockQty = (idx, delta) => {
-    setRestockItems((prev) => prev.map((it) => it.index === idx ? { ...it, addQty: Math.max(0, (it.addQty || 0) + delta) } : it));
+  const adjustRestockQty = (id, delta) => {
+    setRestockItems((prev) => prev.map((it) => {
+      if (it.id !== id) return it;
+      // coerce to number to avoid string concatenation (e.g. '1225' + 1 -> '12251')
+      const cur = Number(it.addQty) || 0;
+      let next = Math.max(0, cur + delta);
+      // cap to 4 digits
+      if (next > 9999) next = 9999;
+      return { ...it, addQty: next };
+    }));
   };
 
   const confirmRestock = async () => {
-    let updatedList;
-    setDataMap((prev) => {
-      const copy = { ...prev };
-      const list = [...(copy[activeTab] || [])];
-    restockItems.forEach(({ index, currentQty, addQty, unit }) => {
-        if (!addQty) return;
-        const r = { ...list[index] };
-      const numericAdd = typeof addQty === 'number' ? addQty : parseInt(addQty, 10) || 0;
-      if (!numericAdd) return;
-      const newQty = Math.max(0, (currentQty || 0) + numericAdd);
-        r.quantity = `${newQty} ${unit}`;
-        r.status = newQty <= 20 ? 'Critical' : newQty <= 60 ? 'Low Stock' : 'In Stock';
-        list[index] = r;
-      });
-      copy[activeTab] = list;
-      updatedList = list;
-      return copy;
-    });
     try {
-      const batch = writeBatch(db);
-      restockItems.forEach(({ index, currentQty, addQty }) => {
-        const numericAdd = typeof addQty === 'number' ? addQty : parseInt(addQty, 10) || 0;
-        if (!numericAdd) return;
-        const row = baseRows[index];
-        const newQty = Math.max(0, (currentQty || 0) + numericAdd);
+      // update each item in its originating category
+      for (const it of restockItems) {
+        const numericAdd = typeof it.addQty === 'number' ? it.addQty : parseInt(it.addQty, 10) || 0;
+        if (!numericAdd) continue;
+        const row = (dataMap[it.category] || []).find(r => r._id === it.id);
+        if (!row) continue;
+        const newQty = Math.max(0, (it.currentQty || 0) + numericAdd);
         const status = newQty <= 20 ? 'Critical' : newQty <= 60 ? 'Low Stock' : 'In Stock';
-        batch.update(doc(db, activeTab, row._id), { quantity: newQty, status });
-      });
-      await batch.commit();
-      try { sessionStorage.setItem(getCacheKey(activeTab), JSON.stringify({ at: Date.now(), rows: updatedList })); } catch {}
+        try {
+          await updateDoc(doc(db, it.category, it.id), { quantity: newQty, status });
+        } catch (e) { console.warn('Failed updating restock for', it, e); }
+        // update cache & in-memory
+        setDataMap(prev => {
+          const copy = { ...prev };
+          const list = [...(copy[it.category] || [])];
+          const idx = list.findIndex(r => r._id === it.id);
+          if (idx >= 0) {
+            const next = { ...list[idx], quantity: `${newQty} ${it.unit}`, status };
+            list[idx] = next;
+            copy[it.category] = list;
+            try { sessionStorage.setItem(getCacheKey(it.category), JSON.stringify({ at: Date.now(), rows: list })); } catch {}
+          }
+          return copy;
+        });
+          // Also create a restock log so Stock Logs can show this as a restock transaction
+          try {
+            // Use sequential ID helper so stock_in documents get readable, incrementing IDs
+            const createSeq = (await import('../../lib/firestoreSeq')).createSequentialDoc;
+            const currentUser = auth?.currentUser;
+            const payload = {
+              item_name: row.item || row.item_name || '',
+              quantity: numericAdd,
+              units: it.unit || '',
+              unit_cost: 0,
+              supplier: row.supplier || '',
+              reference: `RS-${new Date().getFullYear()}`,
+              created_by: currentUser ? currentUser.uid : null,
+              status: 'Received',
+              is_restock: true,
+              moved_to_inventory: true,
+              category: it.category,
+            };
+            // counterId 'stock_in_counter' ensures the counter document name is fixed
+            await createSeq('stock_in', payload, { counterId: 'stock_in_counter', prefix: `RS-${new Date().getFullYear()}-`, digits: 4 });
+          } catch (e) {
+            console.warn('Failed to write restock log to stock_in collection', e);
+          }
+      }
     } catch (e) { console.error('Failed to persist restock', e); }
     setIsRestockOpen(false);
     setSelectMode(false);
@@ -664,71 +778,121 @@ export const InventoryModule = () => {
   // Stock Out helpers
   const openStockOut = () => {
     if (!selectMode || selectedRows.size === 0) return;
-    const list = Array.from(selectedRows).sort((a,b)=>a-b).map((idx) => {
-      const r = baseRows[idx];
-      const m = /^\s*(\d+)\s*(.*)$/.exec(r.quantity || "0 units");
-      const current = m ? parseInt(m[1], 10) : 0;
-      const unit = m ? (m[2] || "units").trim() : "units";
-      // Start with blank outQty so user enters value manually
-      return { index: idx, name: r.item, unit, currentQty: current, outQty: '', status: r.status };
-    });
-    setStockOutItems(list);
+    const ids = Array.from(selectedRows);
+    const list = ids.map((id) => {
+      for (const cat of Object.keys(dataMap)) {
+        const arr = dataMap[cat] || [];
+        const idx = arr.findIndex(r => r._id === id);
+        if (idx >= 0) {
+          const r = arr[idx];
+          const m = /^\s*(\d+)\s*(.*)$/.exec(r.quantity || "0 units");
+          const current = m ? parseInt(m[1], 10) : 0;
+          const unit = m ? (m[2] || "units").trim() : "units";
+          // Start with blank outQty so user enters value manually
+          return { id, category: cat, index: idx, name: r.item, unit, currentQty: current, outQty: '', status: r.status };
+        }
+      }
+      return null;
+    }).filter(Boolean);
+    // dedupe by id
+    const seen2 = new Set();
+    const unique2 = [];
+    for (const it of list) {
+      if (!seen2.has(it.id)) { seen2.add(it.id); unique2.push(it); }
+    }
+    setStockOutItems(unique2);
     setIsStockOutOpen(true);
   };
 
-  const adjustStockOutQty = (idx, delta) => {
-    setStockOutItems((prev) => prev.map((it) => it.index === idx ? { ...it, outQty: Math.max(0, (it.outQty || 0) + delta) } : it));
+  const adjustStockOutQty = (id, delta) => {
+    setStockOutItems((prev) => prev.map((it) => it.id === id ? { ...it, outQty: Math.max(0, (it.outQty || 0) + delta) } : it));
   };
 
   const confirmStockOut = async () => {
-    // Precompute summary to avoid side effects inside state updaters (prevents duplicates in StrictMode)
-    const summary = stockOutItems.map(({ index, name, currentQty, outQty, unit }) => {
-      const numericOut = typeof outQty === 'number' ? outQty : parseInt(outQty, 10) || 0; // no clamping – allow any amount
-      const after = Math.max(0, (currentQty || 0) - numericOut); // keep inventory floor at 0 visually
-      return { index, name, before: currentQty, out: numericOut, after, unit };
+    // Defensive validation: ensure UI requirements met even if button was clickable
+    const anyPositive = stockOutItems.some(it => it.status !== 'Critical' && (parseInt(it.outQty,10) || 0) > 0);
+    const allFilled = stockOutItems.every(it => it.status === 'Critical' ? true : (it.outQty !== '' && it.outQty !== null && it.outQty !== undefined));
+    if (!anyPositive) {
+      setStockOutValidationMessage('Enter at least one quantity greater than zero');
+      return;
+    }
+    if (!allFilled) {
+      setStockOutValidationMessage('Please fill quantity for all selectable items (enter 0 if not stocking out this item)');
+      return;
+    }
+    // Defensive: ensure no requested stock-out exceeds current available quantity
+    const overLimit = stockOutItems.find(it => {
+      const outN = parseInt(it.outQty, 10) || 0;
+      const cur = Number(it.currentQty || 0);
+      return outN > cur;
+    });
+    if (overLimit) {
+      setStockOutValidationMessage(`Quantity for "${overLimit.name}" cannot exceed available (${overLimit.currentQty}).`);
+      return;
+    }
+    setStockOutValidationMessage('');
+    // Precompute summary with stable ids to avoid category/index mismatches
+    const summary = stockOutItems.map(({ id, category, name, currentQty, outQty, unit }) => {
+      const numericOut = typeof outQty === 'number' ? outQty : parseInt(outQty, 10) || 0;
+      const after = Math.max(0, (currentQty || 0) - numericOut);
+      return { id, category, name, before: currentQty, out: numericOut, after, unit };
     });
 
-    let updatedList;
+    // Update in-memory data per category
     setDataMap((prev) => {
       const copy = { ...prev };
-      const list = [...(copy[activeTab] || [])];
-      summary.forEach(({ index, after, unit }) => {
-        const r = { ...list[index] };
-        r.quantity = `${after} ${unit}`;
-        r.status = after <= 20 ? 'Critical' : after <= 60 ? 'Low Stock' : 'In Stock';
-        list[index] = r;
-      });
-      copy[activeTab] = list;
-      updatedList = list;
+      for (const s of summary) {
+        const list = [...(copy[s.category] || [])];
+        const idx = list.findIndex(r => r._id === s.id);
+        if (idx >= 0) {
+          const status = s.after <= 20 ? 'Critical' : s.after <= 60 ? 'Low Stock' : 'In Stock';
+          list[idx] = { ...list[idx], quantity: `${s.after} ${s.unit}`, status };
+          copy[s.category] = list;
+        }
+      }
       return copy;
     });
 
     try {
-      const batch = writeBatch(db);
-      summary.forEach(({ index, after }) => {
-        const row = baseRows[index];
-        const status = after <= 20 ? 'Critical' : after <= 60 ? 'Low Stock' : 'In Stock';
-        batch.update(doc(db, activeTab, row._id), { quantity: after, status });
-      });
-      await batch.commit();
-      try { sessionStorage.setItem(getCacheKey(activeTab), JSON.stringify({ at: Date.now(), rows: updatedList })); } catch {}
+      // Persist each affected item using its originating category
+      for (const s of summary) {
+        const status = s.after <= 20 ? 'Critical' : s.after <= 60 ? 'Low Stock' : 'In Stock';
+        try {
+          await updateDoc(doc(db, s.category, s.id), { quantity: s.after, status });
+        } catch (e) { console.warn('Failed to persist stock out for', s, e); }
+        // update cache
+        try {
+          const list = (dataMap[s.category] || []).map(r => r._id === s.id ? { ...r, quantity: `${s.after} ${s.unit}`, status } : r);
+          try { sessionStorage.setItem(getCacheKey(s.category), JSON.stringify({ at: Date.now(), rows: list })); } catch {}
+        } catch {}
+      }
       // Log stock-out events for dashboard usage trend
       const refBase = Date.now().toString(36).toUpperCase();
       const logs = summary
         .filter(s => (s.out || 0) > 0)
         .map((s, i) => {
-          const invRow = baseRows[s.index] || {};
+          // prefer perItemNotes mapping (set via dropdown / apply-to-all)
+          const perNote = (perItemNotes && perItemNotes[s.id]) ? String(perItemNotes[s.id]).trim() : '';
+          const batchNote = stockOutNotes.trim() || '';
+          const notesForLog = perNote || batchNote;
+          // try to read supplier from the in-memory dataMap for the originating category
+          let supplierName = '';
+          try {
+            const list = dataMap && dataMap[s.category] ? dataMap[s.category] : [];
+            const found = list.find(r => r._id === s.id);
+            supplierName = (found && found.supplier) ? found.supplier : '';
+          } catch (e) { supplierName = ''; }
           return {
-            category: activeTab,
+            category: s.category,
             item_name: s.name,
             quantity: Number(s.out || 0),
             unit: s.unit,
             type: 'stock_out',
             created_by: auth?.currentUser?.uid || null,
-            supplier: invRow.supplier || '',
+            supplier: supplierName || '',
             reference: `SO-${refBase}-${i+1}`,
             timestamp: serverTimestamp(),
-            notes: stockOutNotes.trim() || '',
+            notes: notesForLog,
           };
         });
       if (logs.length) {
@@ -740,12 +904,18 @@ export const InventoryModule = () => {
       }
     } catch (e) { console.error('Failed to persist stock out', e); }
 
-  setIsStockOutOpen(false);
-  setStockOutNotes("");
+    setIsStockOutOpen(false);
+    setStockOutNotes("");
     setSelectMode(false);
     setSelectedRows(new Set());
-    setStockOutSummary(summary);
-    setTimeout(() => setIsStockOutSummaryOpen(true), 120);
+    const changed = summary.filter(s => (s.out || 0) > 0);
+    setStockOutSummary(changed);
+    if (changed.length) {
+      setTimeout(() => setIsStockOutSummaryOpen(true), 120);
+    } else {
+      // No actual changes to show; show simple success flow
+      setTimeout(() => { setSuccessType('stockOut'); setIsSuccessOpen(true); }, 160);
+    }
   };
 
   return (
@@ -870,7 +1040,7 @@ export const InventoryModule = () => {
               <div className="h-px bg-gray-100" />
               <button onClick={handleToggleSelect} className="w-full text-left px-4 py-2 hover:bg-gray-50 text-gray-700 flex items-center gap-2">
                 <span className={`inline-block w-2 h-2 rounded-full ${selectMode ? 'bg-[#00b7c2]' : 'bg-transparent border border-gray-300'}`} />
-                {selectMode ? 'Exit Select Mode' : 'Select'}
+                Select
               </button>
             </div>
           </div>
@@ -910,6 +1080,11 @@ export const InventoryModule = () => {
               <h2 className="[font-family:'Inter',Helvetica] font-semibold text-xl text-gray-900">
                 OVERVIEW ({displayRows.length} {displayRows.length === 1 ? 'item' : 'items'})
               </h2>
+              {selectMode && (
+                <div>
+                  <Button onClick={handleToggleSelect} className="px-4 py-2 rounded-full bg-[#00b7c2] hover:bg-[#009ba5] text-white [font-family:'Oxygen',Helvetica] font-semibold text-sm">Unselect</Button>
+                </div>
+              )}
             </div>
 
             {/* Inventory Table */}
@@ -937,8 +1112,8 @@ export const InventoryModule = () => {
                           <input
                             type="checkbox"
                             className="w-4 h-4 rounded border-gray-300 text-[#00b7c2] focus:ring-[#00b7c2]"
-                            checked={selectedRows.has(item._sourceIndex)}
-                            onChange={() => toggleRowSelected(item._sourceIndex)}
+                            checked={selectedRows.has(item._id)}
+                            onChange={() => toggleRowSelected(item._id)}
                           />
                         </td>
                       )}
@@ -1083,11 +1258,11 @@ export const InventoryModule = () => {
             {/* Form */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm text-gray-600 mb-1">Item Name</label>
-                <Input className="h-10 rounded-full" value={itemNameValue} onChange={(e) => setItemNameValue(e.target.value)} />
+                <label className="block text-sm text-gray-600 mb-1">Item Name <span className="text-red-500">*</span></label>
+                <Input className="h-10 rounded-full" value={itemNameValue} onChange={handleItemNameChange} />
               </div>
               <div>
-                <label className="block text-sm text-gray-600 mb-1">Supplier Name</label>
+                <label className="block text-sm text-gray-600 mb-1">Supplier Name <span className="text-red-500">*</span></label>
                 <div className="relative inv-supplier">
                   <button type="button"
                             onClick={() => setSupplierOpen((v) => { const next = !v; if (next) { setUnitOpen(false); setStatusOpen(false); setQaOpen(false);} return next; })}
@@ -1107,7 +1282,7 @@ export const InventoryModule = () => {
               </div>
 
               <div>
-                <label className="block text-sm text-gray-600 mb-1">Quantity</label>
+                <label className="block text-sm text-gray-600 mb-1">Quantity <span className="text-red-500">*</span></label>
                 <Input
                   className="h-10 rounded-full"
                   value={quantityValue}
@@ -1117,7 +1292,7 @@ export const InventoryModule = () => {
                 />
               </div>
               <div>
-                <label className="block text-sm text-gray-600 mb-1">Units <span className="text-xs text-gray-400">(grams, vials, etc.)</span></label>
+                <label className="block text-sm text-gray-600 mb-1">Units <span className="text-red-500">*</span> <span className="text-xs text-gray-400">(grams, vials, etc.)</span></label>
                 <div className="relative inv-unit">
                   <button type="button"
                           onClick={() => setUnitOpen((v) => { const next = !v; if (next) { setSupplierOpen(false); setStatusOpen(false); setQaOpen(false);} return next; })}
@@ -1137,7 +1312,7 @@ export const InventoryModule = () => {
               </div>
 
               <div className="col-span-2">
-                <label className="block text-sm text-gray-600 mb-1">Unit Cost</label>
+                <label className="block text-sm text-gray-600 mb-1">Unit Cost <span className="text-red-500">*</span></label>
                 <div className="relative">
                   <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 select-none pointer-events-none">₱</span>
                   <Input
@@ -1151,10 +1326,16 @@ export const InventoryModule = () => {
               </div>
             </div>
 
-            <div className="mt-6 flex items-center justify-center">
-              <Button onClick={handleSave} className="px-8 py-2 rounded-full bg-[#00b7c2] hover:bg-[#009ba5] text-white shadow-lg">
-                Save
+            <div className="mt-6 flex flex-col items-center gap-2">
+              <Button
+                onClick={handleSave}
+                disabled={!isNewOrderValid || isSaving}
+                aria-disabled={!isNewOrderValid || isSaving}
+                className={`${!isNewOrderValid || isSaving ? 'px-8 py-2 rounded-full text-white bg-gray-400 cursor-not-allowed' : 'px-8 py-2 rounded-full bg-[#00b7c2] hover:bg-[#009ba5] text-white'} shadow-lg`}
+              >
+                {isSaving ? 'Saving…' : 'Save'}
               </Button>
+              {!isNewOrderValid && <div className="text-xs text-red-500">Please fill all required fields</div>}
             </div>
           </div>
         </div>
@@ -1236,14 +1417,23 @@ export const InventoryModule = () => {
                 <div className="px-4 py-3">Item Name</div>
                 <div className="px-4 py-3">Quantity</div>
               </div>
-              <div className="divide-y divide-gray-200">
+              {/* limit to ~5 rows and scroll internally to avoid expanding modal */}
+              <div className="divide-y divide-gray-200 max-h-[280px] overflow-y-auto overflow-x-hidden">
                 {restockItems.map((it) => (
-                  <div key={it.index} className="grid grid-cols-2 items-center px-4 py-3">
+                    <div key={it.id} className="grid grid-cols-2 items-center px-4 py-3">
                     <div>
                       <div className="[font-family:'Inter',Helvetica] text-gray-900">{it.name}</div>
                       <div className="[font-family:'Oxygen',Helvetica] text-xs text-gray-500">{it.currentQty} {it.unit}</div>
                     </div>
-                    <div className="flex items-center">
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => adjustRestockQty(it.id, -1)}
+                        className="w-9 h-9 rounded-md border border-gray-300 bg-white text-gray-700 flex items-center justify-center hover:bg-gray-50"
+                        aria-label="Decrease quantity"
+                      >
+                        −
+                      </button>
                       <input
                         type="text"
                         inputMode="numeric"
@@ -1252,12 +1442,24 @@ export const InventoryModule = () => {
                         value={it.addQty}
                         onChange={(e) => {
                           let raw = e.target.value.replace(/[^0-9]/g, '');
+                          if (raw === '') {
+                            setRestockItems(prev => prev.map(p => p.id === it.id ? { ...p, addQty: '' } : p));
+                            return;
+                          }
                           if (raw.length > 4) raw = raw.slice(0,4);
-                          // allow blank -> treated as 0 during confirm
-                          setRestockItems(prev => prev.map(p => p.index === it.index ? { ...p, addQty: raw } : p));
+                          const n = parseInt(raw, 10) || 0;
+                          setRestockItems(prev => prev.map(p => p.id === it.id ? { ...p, addQty: n } : p));
                         }}
                         className="w-24 h-9 rounded-md border border-gray-300 focus:border-[#00b7c2] focus:ring-2 focus:ring-[#00b7c2]/20 text-center [font-family:'Inter',Helvetica] text-gray-800 text-sm tracking-wide"
                       />
+                      <button
+                        type="button"
+                        onClick={() => adjustRestockQty(it.id, 1)}
+                        className="w-9 h-9 rounded-md border border-gray-300 bg-white text-gray-700 flex items-center justify-center hover:bg-gray-50"
+                        aria-label="Increase quantity"
+                      >
+                        +
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -1306,68 +1508,117 @@ export const InventoryModule = () => {
 
             <div className="rounded-xl border border-gray-200 overflow-hidden">
               <div className="grid grid-cols-3 bg-gray-50 text-gray-700 text-sm [font-family:'Inter',Helvetica]">
-                <div className="px-4 py-3">Item Name</div>
-                <div className="px-4 py-3">Status</div>
-                <div className="px-4 py-3">Quantity</div>
+                <div className="px-4 py-3 text-left">Item Name</div>
+                <div className="px-4 py-3 text-center">Status</div>
+                <div className="px-4 py-3 text-center">Quantity</div>
               </div>
-              <div className="divide-y divide-gray-200">
+              {/* limit to ~5 rows and scroll internally to avoid expanding modal */}
+              <div className="divide-y divide-gray-200 max-h-[320px] overflow-y-auto overflow-x-hidden">
                 {stockOutItems.map((it) => (
-                  <div key={it.index} className="grid grid-cols-3 items-center px-4 py-3">
+                  <div key={it.id} className="grid grid-cols-3 items-center px-4 py-3">
                     <div>
                       <div className="[font-family:'Inter',Helvetica] text-gray-900">{it.name}</div>
                       <div className="[font-family:'Oxygen',Helvetica] text-xs text-gray-500">{it.currentQty} {it.unit}</div>
                     </div>
-                    <div>
+                    <div className="flex items-center justify-center gap-2">
                       <Badge className={`px-3 py-1 rounded-full text-xs font-medium ${statusStyleMap[it.status] || 'bg-gray-100 text-gray-700'}`}>{it.status}</Badge>
                     </div>
-                    <div className="flex items-center gap-3">
-                      <Button onClick={() => setStockOutItems(prev => prev.map(p => p.index === it.index ? { ...p, outQty: String(Math.max(0,(parseInt(p.outQty,10)||0)-1)) } : p))} className="w-8 h-8 rounded-md bg-gray-100 hover:bg-gray-200 text-gray-700 p-0">
-                        <MinusIcon className="w-4 h-4" />
-                      </Button>
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        pattern="\\d{0,4}"
-                        placeholder="0"
-                        value={it.outQty}
-                        onChange={(e) => {
-                          let raw = e.target.value.replace(/[^0-9]/g, '');
-                          if (raw.length > 4) raw = raw.slice(0,4);
-                          setStockOutItems(prev => prev.map(p => p.index === it.index ? { ...p, outQty: raw } : p));
-                        }}
-                        className="w-20 h-9 rounded-md border border-gray-300 focus:border-[#00b7c2] focus:ring-2 focus:ring-[#00b7c2]/20 text-center [font-family:'Inter',Helvetica] text-gray-800 text-sm tracking-wide"
-                      />
-                      <Button onClick={() => setStockOutItems(prev => prev.map(p => p.index === it.index ? { ...p, outQty: String(Math.min(9999,(parseInt(p.outQty,10)||0)+1)) } : p))} className="w-8 h-8 rounded-md bg-gray-100 hover:bg-gray-200 text-gray-700 p-0">
-                        <PlusIcon className="w-4 h-4" />
-                      </Button>
-                      <span className="text-xs text-gray-500">{it.unit}</span>
+                    <div className="flex flex-col items-center gap-1">
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          pattern="\\d{0,4}"
+                          placeholder={it.status === 'Critical' ? '—' : '0'}
+                          value={it.outQty}
+                          onChange={(e) => {
+                            // Prevent editing critical items (defensive)
+                            if (it.status === 'Critical') return;
+                            let raw = e.target.value.replace(/[^0-9]/g, '');
+                            if (raw.length > 4) raw = raw.slice(0,4);
+                            // clamp to available quantity so users cannot type more than currentQty
+                            if (raw !== '') {
+                              const n = parseInt(raw, 10) || 0;
+                              const max = Number(it.currentQty || 0);
+                              if (!isNaN(max) && n > max) raw = String(max);
+                            }
+                            setStockOutItems(prev => prev.map(p => p.id === it.id ? { ...p, outQty: raw } : p));
+                          }}
+                          disabled={it.status === 'Critical'}
+                          aria-invalid={it.status === 'Critical'}
+                          className={`w-28 h-9 rounded-md border ${it.status === 'Critical' ? 'border-red-400 bg-white text-gray-800' : 'border-gray-300'} ${it.status === 'Critical' ? 'focus:border-red-400 focus:ring-2 focus:ring-red-100' : 'focus:border-[#00b7c2] focus:ring-2 focus:ring-[#00b7c2]/20'} text-center [font-family:'Inter',Helvetica] text-gray-800 text-sm tracking-wide`}
+                        />
+                      </div>
                     </div>
                   </div>
                 ))}
               </div>
             </div>
 
-            {/* Notes Input */}
+            {/* Notes Input / Per-item dropdown */}
             <div className="mt-6">
-              <label className="block text-sm text-gray-600 mb-1">Notes (applies to this stock out batch)</label>
-              <textarea
-                className="w-full min-h-[90px] rounded-lg border border-gray-300 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#00b7c2]/20 focus:border-[#00b7c2] text-sm"
-                placeholder="Add optional notes about why items are stocked out, usage context, patient case, etc."
-                value={stockOutNotes}
-                onChange={(e) => setStockOutNotes(e.target.value)}
-                maxLength={800}
-              />
-              <div className="mt-1 text-xs text-gray-400 text-right">{stockOutNotes.length}/800</div>
+              <label className="block text-sm text-gray-600 mb-1">Notes</label>
+              <div className="flex items-start gap-3">
+                <div className="w-44 relative" ref={noteRef}>
+                  <label className="text-xs text-gray-500">Apply note to</label>
+                  <button type="button" onClick={() => setNoteOpen(v => !v)} className="w-full mt-1 rounded-md border border-gray-300 px-3 py-2 text-left flex items-center justify-between">
+                    <span className="truncate">{noteTarget === 'ALL' ? 'Entire batch (default)' : (stockOutItems.find(i => i.id === noteTarget)?.name || noteTarget)}</span>
+                    <svg className={`w-4 h-4 ml-2 transition-transform ${noteOpen ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z" clipRule="evenodd"/></svg>
+                  </button>
+                  <div className={`absolute z-40 left-0 right-0 mt-2 bg-white rounded-lg shadow-lg ring-1 ring-black/5 overflow-hidden transition-all origin-top ${noteOpen ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-95 -translate-y-1 pointer-events-none'}`}>
+                    <div className="py-1">
+                      <button onClick={() => { setNoteTarget('ALL'); setNoteOpen(false); }} className={`w-full text-left px-3 py-2 text-sm ${noteTarget === 'ALL' ? 'bg-[#E6F7F9] text-[#00b7c2] font-medium' : 'hover:bg-gray-50'}`}>Entire batch (default)</button>
+                      {stockOutItems.map(it => (
+                        <button key={it.id} onClick={() => { setNoteTarget(it.id); setNoteOpen(false); }} className={`w-full text-left px-3 py-2 text-sm ${noteTarget === it.id ? 'bg-[#E6F7F9] text-[#00b7c2] font-medium' : 'hover:bg-gray-50'}`}>{it.name}</button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex-1">
+                  <label className="text-xs text-gray-500">Note content</label>
+                  <textarea
+                    className="w-full min-h-[90px] rounded-lg border border-gray-300 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#00b7c2]/20 focus:border-[#00b7c2] text-sm"
+                    placeholder="Add optional notes about why items are stocked out, usage context, patient case, etc."
+                    value={noteTarget === 'ALL' ? stockOutNotes : (perItemNotes[noteTarget] || '')}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (noteTarget === 'ALL') setStockOutNotes(v);
+                      else setPerItemNotes(prev => ({ ...(prev||{}), [noteTarget]: v }));
+                    }}
+                    maxLength={800}
+                  />
+                  <div className="mt-1 text-xs text-gray-400 text-right">{(noteTarget === 'ALL' ? stockOutNotes.length : (perItemNotes[noteTarget]||'').length)}/800</div>
+                </div>
+              </div>
+              <div className="mt-2">
+                <button type="button" onClick={() => {
+                  // apply current note content to all items
+                  const content = (noteTarget === 'ALL' ? stockOutNotes : (perItemNotes[noteTarget]||''));
+                  if (!content) return;
+                  const map = {};
+                  stockOutItems.forEach(it => { map[it.id] = content; });
+                  setPerItemNotes(map);
+                }} className="px-3 py-2 rounded-full bg-[#00b7c2] text-white">Apply to all items</button>
+              </div>
             </div>
 
-            {(() => { const anyValid = stockOutItems.some(it => parseInt(it.outQty,10) > 0); return (
-              <div className="mt-6 flex flex-col items-center gap-2">
-                <Button disabled={!anyValid} onClick={confirmStockOut} className={`px-8 py-2 rounded-full text-white shadow-lg ${!anyValid ? 'bg-gray-400 cursor-not-allowed' : 'bg-[#00b7c2] hover:bg-[#009ba5]'}`}>
-                  Stock out
-                </Button>
-                {!anyValid && <div className="text-xs text-gray-400">Enter at least one quantity</div>}
-              </div>
-            ); })()}
+            {(() => {
+              // For validation require:
+              // - every non-Critical selectable item must have a quantity entered (can be 0)
+              // - at least one non-Critical item must have a positive quantity
+              const anyPositive = stockOutItems.some(it => it.status !== 'Critical' && (parseInt(it.outQty,10) || 0) > 0);
+              const allFilled = stockOutItems.every(it => it.status === 'Critical' ? true : (it.outQty !== '' && it.outQty !== null && it.outQty !== undefined));
+              const canSubmit = anyPositive && allFilled;
+              return (
+                <div className="mt-6 flex flex-col items-center gap-2">
+                  <Button disabled={!canSubmit} onClick={confirmStockOut} className={`px-8 py-2 rounded-full text-white shadow-lg ${!canSubmit ? 'bg-gray-400 cursor-not-allowed' : 'bg-[#00b7c2] hover:bg-[#009ba5]'}`}>
+                    Stock out
+                  </Button>
+                  {!anyPositive && <div className="text-xs text-gray-400">Enter at least one quantity greater than zero</div>}
+                  {anyPositive && !allFilled && <div className="text-xs text-red-500">Please fill quantity for all selectable items (enter 0 if not stocking out this item)</div>}
+                </div>
+              );
+            })()}
           </div>
         </div>
       </div>
@@ -1417,7 +1668,7 @@ export const InventoryModule = () => {
                   <div className="px-4 py-3 text-sm text-gray-500">No notes yet.</div>
                 ) : (
                   notesList.map((n) => (
-                    <div key={n.id} className="px-4 py-3">
+                    <div key={n.id} className={`px-4 py-3 ${n.read ? '' : 'bg-blue-50/60 border-l-4 border-blue-200'}`}>
                       {editingNoteId === n.id ? (
                         <div>
                           <textarea
@@ -1445,9 +1696,10 @@ export const InventoryModule = () => {
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
                             <button
-                              className="p-1 rounded hover:bg-green-50 text-green-600"
-                              title="Mark as read"
-                              onClick={() => markNoteAsRead(n.id)}
+                              className={`p-1 rounded ${n.read ? 'bg-gray-50 text-gray-400 cursor-default' : 'hover:bg-green-50 text-green-600'}`}
+                              title={n.read ? 'Already read' : 'Mark as read'}
+                              onClick={() => { if (!n.read) toggleNoteRead(n.id); }}
+                              disabled={!!n.read}
                             >
                               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
                                 <path fillRule="evenodd" d="M16.704 5.29a1 1 0 00-1.408-1.42L8.25 10.955 5.7 8.4a1 1 0 10-1.4 1.428l3.25 3.186a1 1 0 001.404-.006l7.75-7.72z" clipRule="evenodd" />

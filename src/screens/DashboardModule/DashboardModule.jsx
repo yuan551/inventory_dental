@@ -98,7 +98,13 @@ export const DashboardModule = () => {
 
   // Defensive filter (in case cache still held a placeholder before code update)
   const realItems = useMemo(() => items.filter(it => it && it.id !== 'dummy' && (it.name || it.quantity > 0)), [items]);
-  const lowStockCount = useMemo(() => realItems.filter((it) => it.quantity < threshold).length, [realItems]);
+  // Count both 'Critical' and 'Low Stock' items. Fallback to quantity-based rule for items missing status.
+  const lowStockCount = useMemo(() => realItems.filter((it) => {
+    if (it.status === 'Critical' || it.status === 'Low Stock') return true;
+    // fallback: treat items with quantity <= 60 as low/critical when status missing
+    if (!it.status) return (Number(it.quantity || 0) <= 60);
+    return false;
+  }).length, [realItems]);
   const expiringSoonCount = useMemo(() => realItems.filter((it) => it.expiration && it.expiration <= in30 && it.expiration >= now).length, [realItems]);
   const totalValue = useMemo(() => realItems.reduce((sum, it) => sum + (Number(it.unit_cost || 0) * Number(it.quantity || 0)), 0), [realItems]);
 
@@ -153,20 +159,18 @@ export const DashboardModule = () => {
       const cached = tryLoad();
       if (cached) { setTrendMonths(cached.months); setTrendSeries(cached.series); return; }
 
-      // Build last 6 months window
+      // Fixed window: July -> December for the current year
+      const year = new Date().getFullYear();
       const months = [];
-      const labels = [];
-      const base = new Date();
-      base.setDate(1);
-      for (let i = 5; i >= 0; i--) {
-        const d = new Date(base.getFullYear(), base.getMonth() - i, 1);
-        months.push({ y: d.getFullYear(), m: d.getMonth() });
-        labels.push(d.toLocaleString('en-US', { month: 'short' }));
+      // Labels explicitly July to Dec
+      const labels = ['Jul','Aug','Sep','Oct','Nov','Dec'];
+      for (let m = 6; m <= 11; m++) {
+        months.push({ y: year, m });
       }
 
       // Fetch stock_out logs within the earliest month start to the end of latest month
-      const start = new Date(months[0].y, months[0].m, 1);
-      const end = new Date(months[5].y, months[5].m + 1, 1);
+  const start = new Date(months[0].y, months[0].m, 1);
+  const end = new Date(months[5].y, months[5].m + 1, 1);
       try {
         // We may not have composite indexes; get all and filter client-side to avoid index issues
         const snap = await getDocs(collection(db, 'stock_logs'));
