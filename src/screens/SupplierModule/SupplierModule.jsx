@@ -2,7 +2,14 @@ import React, { useEffect, useState } from "react";
 import { DashboardSidebarSection } from "../DashboardModule/sections/DashboardSidebarSection/DashboardSidebarSection";
 import { AppHeader } from "../../components/layout/AppHeader";
 import { db } from "../../firebase";
-import { collection, getDocs, onSnapshot } from "firebase/firestore";
+import {
+  collection,
+  getDocs,
+  onSnapshot,
+  addDoc,
+  serverTimestamp,
+} from "firebase/firestore";
+import { ChevronDown as ChevronDownIcon } from "lucide-react";
 import Users from "../../assets/Users.png";
 import mark_email_unread from "../../assets/mark_email_unread.png";
 import PhoneIcon from "../../assets/PhoneIcon.png";
@@ -23,42 +30,6 @@ const initialSuppliers = [
     lastOrder: "9/20/2024",
     status: "Active",
   },
-  {
-    name: "PharmaCorp",
-    address: "456 Pharma Ave, Medicine Town, MT 67890",
-    contactName: "Dr. Emily Davis",
-    email: "sales@pharmacorp.com",
-    phone: "+1 (555) 987-6543",
-    category: "Pharmaceuticals",
-    rating: 4.9,
-    totalOrders: 28,
-    lastOrder: "9/22/2024",
-    status: "Active",
-  },
-  {
-    name: "DentalTech Pro",
-    address: "789 Tech Blvd, Innovation City, IC 13579",
-    contactName: "Michael Chen",
-    email: "support@dentaltechpro.com",
-    phone: "+1 (555) 456-7890",
-    category: "Equipment",
-    rating: 4.7,
-    totalOrders: 12,
-    lastOrder: "9/18/2024",
-    status: "Active",
-  },
-  {
-    name: "SafeMed Inc.",
-    address: "321 Safety St, Secure City, SC 24680",
-    contactName: "Sarah Wilson",
-    email: "orders@safemed.com",
-    phone: "+1 (555) 321-0987",
-    category: "Safety Equipment",
-    rating: 4.6,
-    totalOrders: 8,
-    lastOrder: "8/15/2024",
-    status: "Inactive",
-  },
 ];
 
 export const SupplierModule = () => {
@@ -70,78 +41,62 @@ export const SupplierModule = () => {
     }
   });
 
-  const [consumablesOrders, setConsumablesOrders] = useState([]);
-  const [medicinesOrders, setMedicinesOrders] = useState([]);
-  const [equipmentOrders, setEquipmentOrders] = useState([]);
   const [orders, setOrders] = useState([]);
 
   useEffect(() => {
-    const unsubConsumables = onSnapshot(
-      collection(db, "consumables"),
-      (snap) => {
-        setConsumablesOrders(
-          snap.docs.map((doc) => {
-            const data = doc.data();
-            return {
-              id: doc.id,
-              item: data.item_name || data.name || "",
-              quantity: `${data.quantity || 0} ${
-                data.units || data.unit || ""
-              }`,
-              supplier: data.supplier || "",
-              unitCost: `₱${Number(data.unit_cost || 0).toFixed(2)}`,
-              status: data.status || "",
-              expiration: data.expiration || data.expiration_date || "—",
-              category: "consumables",
-            };
-          })
-        );
-      }
-    );
-    const unsubMedicines = onSnapshot(collection(db, "medicines"), (snap) => {
-      setMedicinesOrders(
+    const unsubOrdered = onSnapshot(collection(db, "ordered"), (snap) => {
+      setOrders(
         snap.docs.map((doc) => {
           const data = doc.data();
           return {
             id: doc.id,
-            item: data.item_name || data.name || "",
-            quantity: `${data.quantity || 0} ${data.units || data.unit || ""}`,
-            supplier: data.supplier || "",
-            unitCost: `₱${Number(data.unit_cost || 0).toFixed(2)}`,
+            item: data.itemNameValue || data.item_name || data.name || "",
+            quantity: `${data.quantityValue || data.quantity || 0} ${
+              data.unitValue || data.units || data.unit || ""
+            }`,
+            supplier: data.supplierValue || data.supplier || "",
+            unitCost: `₱${Number(
+              data.unitCostValue || data.unit_cost || 0
+            ).toFixed(2)}`,
             status: data.status || "",
             expiration: data.expiration || data.expiration_date || "—",
-            category: "medicines",
+            category: data.category || "",
+            dateDelivered: data.dateDelivered || "",
+            created_at: data.created_at
+              ? data.created_at.toDate
+                ? data.created_at.toDate()
+                : new Date(data.created_at)
+              : new Date(0),
           };
         })
       );
     });
-    const unsubEquipment = onSnapshot(collection(db, "equipment"), (snap) => {
-      setEquipmentOrders(
-        snap.docs.map((doc) => {
-          const data = doc.data();
-          return {
-            id: doc.id,
-            item: data.item_name || data.name || "",
-            quantity: `${data.quantity || 0} ${data.units || data.unit || ""}`,
-            supplier: data.supplier || "",
-            unitCost: `₱${Number(data.unit_cost || 0).toFixed(2)}`,
-            status: data.status || "",
-            expiration: data.expiration || data.expiration_date || "—",
-            category: "equipment",
-          };
-        })
-      );
-    });
-    return () => {
-      unsubConsumables();
-      unsubMedicines();
-      unsubEquipment();
-    };
+    return () => unsubOrdered();
   }, []);
 
   useEffect(() => {
-    setOrders([...consumablesOrders, ...medicinesOrders, ...equipmentOrders]);
-  }, [consumablesOrders, medicinesOrders, equipmentOrders]);
+    const unsubSuppliers = onSnapshot(collection(db, "suppliers"), (snap) => {
+      setSuppliers(
+        snap.docs.map((doc) => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            name: data.supplier,
+            address: data.address || "",
+            contactName: data.contact_person || "",
+            email: data.email || "",
+            phone: data.contact_number || "",
+            category: data.category || "",
+            rating: data.rating || "",
+            totalOrders: data.total_orders || "",
+            lastOrder: data.last_orders || "",
+            status: data.status || "",
+          };
+        })
+      );
+    });
+    return () => unsubSuppliers();
+  }, []);
 
   const [activeTab, setActiveTab] = useState("directory");
 
@@ -162,7 +117,7 @@ export const SupplierModule = () => {
     email: "",
     phone: "",
     category: "",
-    rating: "",
+    rating: "-",
     totalOrders: "",
     lastOrder: "",
     status: "",
@@ -199,21 +154,27 @@ export const SupplierModule = () => {
     }
   };
 
-  const handleAddSupplier = (e) => {
+  const handleAddSupplier = async (e) => {
     e.preventDefault();
+    if (!validateEmail(form.email)) return;
 
-    if (!validateEmail(form.email)) {
-      return;
-    }
+    const payload = {
+      supplier: form.name,
+      contact_number: form.phone,
+      category: form.category,
+      rating: form.rating,
+      total_orders: parseInt(form.totalOrders, 10) || 0,
+      last_orders: form.lastOrder || "",
+      status: form.status || "Inactive",
+      address: form.address || "",
+      email: form.email || "",
+      contact_person: form.contactName || "",
+      created_at: serverTimestamp(),
+      type: "supplier",
+    };
 
-    setSuppliers((prev) => [
-      ...prev,
-      {
-        ...form,
-        rating: parseFloat(form.rating),
-        totalOrders: parseInt(form.totalOrders, 10),
-      },
-    ]);
+    await addDoc(collection(db, "suppliers"), payload); // <-- use "suppliers" collection
+
     setForm({
       name: "",
       address: "",
@@ -261,11 +222,13 @@ export const SupplierModule = () => {
             style={{ minWidth: 160 }}
           >
             <option value="All Supplier">All Supplier</option>
-            {suppliers.map((s) => (
-              <option key={s.name} value={s.name}>
-                {s.name}
-              </option>
-            ))}
+            {[...new Set(suppliers.map((s) => s.name))]
+              .filter((name) => name && name !== "")
+              .map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
           </select>
 
           {/* Add Supplier Button */}
@@ -341,9 +304,10 @@ export const SupplierModule = () => {
           </div>
         )}
         {/* Add Supplier Modal */}
+
         {showForm && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-30">
-            <div className="bg-white rounded-2xl shadow-lg p-0 w-full max-w-md relative">
+            <div className="bg-white rounded-2xl shadow-lg p-0 w-full max-w-xl relative">
               {/* Modal Header */}
               <div className="bg-[#00bfc8] rounded-t-2xl px-6 py-4 flex items-center justify-between">
                 <h3 className="text-white text-xl font-semibold m-0">
@@ -380,39 +344,65 @@ export const SupplierModule = () => {
                 </button>
               </div>
               {/* Modal Form */}
+
               <form
                 onSubmit={handleAddSupplier}
-                className="px-8 py-6 space-y-4"
+                className="px-12 py-10 space-y-6"
               >
-                <h2 className="text-[#00bfc8] text-2xl font-bold [font-family:'Inter',Helvetica]">
+                <h2 className="text-[#00bfc8] text-2xl font-bold [font-family:'Inter',Helvetica] mb-8">
                   Add Supplier
                 </h2>
-                <input
-                  className="w-full border-2 border-[#00bfc8] rounded-full px-4 py-2 mb-0.5 focus:outline-none focus:ring-2 focus:ring-[#00bfc8] placeholder-gray-400"
-                  name="name"
-                  placeholder="Supplier Name"
-                  value={form.name}
-                  onChange={handleInputChange}
-                  required
-                />
-                <div className="flex gap-4 mb-2">
-                  <input
-                    className="w-full border-2 border-[#00bfc8] rounded-full px-4 py-2 focus:outline-none focus:ring-2 focus:ring-[#00bfc8] placeholder-gray-400"
-                    name="address"
-                    placeholder="Address"
-                    value={form.address}
-                    onChange={handleInputChange}
-                    required
-                  />
-                  <div className="w-full">
+                <div className="grid grid-cols-2 gap-x-12 gap-y-10 mb-4">
+                  <div>
+                    <label className="opacity-60 block [font-family:'Oxygen',Helvetica] text-gray-700 text-xl mb-3">
+                      Supplier Name
+                    </label>
+                    <input
+                      className="w-full border-2 border-[#00bfc8] rounded-full px-5 py-3 focus:outline-none [font-family:'Inter',Helvetica] text-gray-700"
+                      name="name"
+                      placeholder="Supplier Name"
+                      value={form.name}
+                      onChange={handleInputChange}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="opacity-60 block [font-family:'Oxygen',Helvetica] text-gray-700 text-xl mb-3">
+                      Contact Person
+                    </label>
+                    <input
+                      className="w-full border-2 border-[#00bfc8] rounded-full px-5 py-3 focus:outline-none [font-family:'Inter',Helvetica] text-gray-700"
+                      name="contactName"
+                      placeholder="Contact Person"
+                      value={form.contactName}
+                      onChange={handleInputChange}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="opacity-60 block [font-family:'Oxygen',Helvetica] text-gray-700 text-xl mb-3">
+                      Contact Number
+                    </label>
+                    <input
+                      className="w-full border-2 border-[#00bfc8] rounded-full px-5 py-3 focus:outline-none [font-family:'Inter',Helvetica] text-gray-700"
+                      type="tel"
+                      name="phone"
+                      placeholder="Contact Number"
+                      value={form.phone}
+                      onChange={handleInputChange}
+                      maxLength={11}
+                      pattern="[0-9]{11}"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="opacity-60 block [font-family:'Oxygen',Helvetica] text-gray-700 text-xl mb-3">
+                      Email Address
+                    </label>
                     <input
                       className={`w-full border-2 ${
                         emailError ? "border-red-500" : "border-[#00bfc8]"
-                      } rounded-full px-4 py-2 focus:outline-none focus:ring-2 ${
-                        emailError
-                          ? "focus:ring-red-500"
-                          : "focus:ring-[#00bfc8]"
-                      } placeholder-gray-400 transition-all duration-200`}
+                      } rounded-full px-5 py-3 focus:outline-none [font-family:'Inter',Helvetica] text-gray-700`}
                       type="email"
                       name="email"
                       placeholder="Email Address"
@@ -427,118 +417,43 @@ export const SupplierModule = () => {
                       </p>
                     )}
                   </div>
-                </div>
-                <div className="flex gap-2 mb-2 min-w-0">
-                  <input
-                    className="w-1/2 border-2 border-[#00bfc8] rounded-full px-4 py-2 focus:outline-none focus:ring-2 focus:ring-[#00bfc8] placeholder-gray-400"
-                    type="tel"
-                    name="phone"
-                    placeholder="Contact Number"
-                    value={form.phone}
-                    onChange={handleInputChange}
-                    maxLength={11}
-                    pattern="[0-9]{11}"
-                    required
-                  />
-                  <input
-                    className="w-1/2 border-2 border-[#00bfc8] rounded-full px-4 py-2 focus:outline-none focus:ring-2 focus:ring-[#00bfc8] placeholder-gray-400"
-                    name="contactName"
-                    placeholder="Contact Person"
-                    value={form.contactName}
-                    onChange={handleInputChange}
-                    required
-                  />
-                </div>
-
-                <select
-                  className="w-full border-2 border-[#00bfc8] rounded-full px-4 py-2 mb-1 mt-5 focus:outline-none focus:ring-2 focus:ring-[#00bfc8] placeholder-gray-400"
-                  name="category"
-                  value={form.category}
-                  onChange={handleInputChange}
-                  required
-                >
-                  <option value="">Select Category</option>
-                  <option value="General Supplies">General Supplies</option>
-                  <option value="Pharmaceuticals">Pharmaceuticals</option>
-                  <option value="Equipment">Equipment</option>
-                  <option value="Safety Equipment">Safety Equipment</option>
-                </select>
-
-                {/* Rating */}
-                {/* Ratings (disabled, gray, not inputtable) */}
-                <div className="flex items-center py-1 gap-3 mb-2 ml-2">
-                  <label className="text-gray-400 font-medium">Rating</label>
-                  <div className="flex gap-1 ml-auto">
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <svg
-                        key={star}
-                        className="w-7 h-7 text-gray-300"
-                        fill="currentColor"
-                        viewBox="0 0 20 20"
-                      >
-                        <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.967a1 1 0 00.95.69h4.178c.969 0 1.371 1.24.588 1.81l-3.385 2.46a1 1 0 00-.364 1.118l1.287 3.966c.3.922-.755 1.688-1.54 1.118l-3.385-2.46a1 1 0 00-1.175 0l-3.385 2.46c-.784.57-1.838-.196-1.539-1.118l1.287-3.966a1 1 0 00-.364-1.118L2.049 9.394c-.783-.57-.38-1.81.588-1.81h4.178a1 1 0 00.95-.69l1.286-3.967z" />
-                      </svg>
-                    ))}
+                  <div>
+                    <label className="opacity-60 block [font-family:'Oxygen',Helvetica] text-gray-700 text-xl mb-3">
+                      Category
+                    </label>
+                    <select
+                      className="w-full border-2 border-[#00bfc8] rounded-full px-5 py-3 focus:outline-none [font-family:'Inter',Helvetica] text-gray-700"
+                      name="category"
+                      value={form.category}
+                      onChange={handleInputChange}
+                      required
+                    >
+                      <option value=""> Select Category</option>
+                      <option value="General Supplies">General Supplies</option>
+                      <option value="Pharmaceuticals">Pharmaceuticals</option>
+                      <option value="Equipment">Equipment</option>
+                      <option value="Safety Equipment">Safety Equipment</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="opacity-60 block [font-family:'Oxygen',Helvetica] text-gray-700 text-xl mb-3">
+                      Company Address
+                    </label>
+                    <input
+                      className="w-full border-2 border-[#00bfc8] rounded-full px-5 py-3 focus:outline-none [font-family:'Inter',Helvetica] text-gray-700"
+                      name="address"
+                      placeholder="Address"
+                      value={form.address}
+                      onChange={handleInputChange}
+                      required
+                    />
                   </div>
                 </div>
-                {/* Total Orders (disabled, gray, not inputtable) */}
-                <div className="flex items-center gap-4 mb-2 justify-end">
-                  <label
-                    htmlFor="totalOrders"
-                    className="text-gray-700 ml-2  font-medium whitespace-nowrap [font-family:'Oxygen',Helvetica]"
-                  >
-                    Total Orders:
-                  </label>
-                  <input
-                    id="totalOrders"
-                    className="w-full ml-10 border-2 border-gray-300 bg-gray-100 rounded-full px-4 py-2 focus:outline-none text-gray-400 [font-family:'Oxygen',Helvetica]"
-                    name="totalOrders"
-                    placeholder="Total Orders"
-                    type="number"
-                    disabled
-                  />
+                <div className="flex justify-center mt-6">
+                  <button className="  bg-[#00bfc8]  text-white rounded-full px-10 py-3 mt-2 [font-family:'Oxygen',Helvetica] font-medium shadow hover:bg-[#00a7b0] transition text-lg">
+                    Save
+                  </button>
                 </div>
-                {/* Last Orders (disabled, gray, not inputtable) */}
-                <div className="flex items-center gap-4 mb-2 justify-end">
-                  <label
-                    htmlFor="lastOrder"
-                    className="text-gray-700 ml-2 font-medium whitespace-nowrap [font-family:'Oxygen',Helvetica]"
-                  >
-                    Last Order:
-                  </label>
-                  <input
-                    id="lastOrder"
-                    className="w-full border-2 ml-10 border-gray-300 bg-gray-100 rounded-full px-4 py-2 focus:outline-none text-gray-400 [font-family:'Oxygen',Helvetica]"
-                    name="lastOrder"
-                    placeholder="Last Orders"
-                    type="date"
-                    disabled
-                  />
-                </div>
-                {/* Status (disabled, gray, not inputtable) */}
-                <div className="flex items-center gap-4 mb-2 justify-end">
-                  <label
-                    htmlFor="status"
-                    className="text-gray-700 ml-2 font-medium whitespace-nowrap [font-family:'Oxygen',Helvetica]"
-                  >
-                    Status:
-                  </label>
-                  <select
-                    id="status"
-                    className="w-full ml-10 border-2 border-gray-300 bg-gray-100 rounded-full px-4 py-2 focus:outline-none text-gray-400 [font-family:'Oxygen',Helvetica]"
-                    name="status"
-                    disabled
-                  >
-                    <option value="Active">Status</option>
-                  </select>
-                </div>
-                {/* Save Button */}
-                <button
-                  type="submit"
-                  className="w-full bg-[#00bfc8] text-white rounded-full px-5 py-2 mt-2 [font-family:'Oxygen',Helvetica] font-medium shadow hover:bg-[#00a7b0] transition text-lg"
-                >
-                  Save
-                </button>
               </form>
             </div>
           </div>
@@ -786,24 +701,51 @@ export const SupplierModule = () => {
                           ? editHoverRating
                           : editForm.rating;
                       const isFilled = displayRating >= star;
+                      const isRated =
+                        editForm.rating !== "-" &&
+                        editForm.rating !== "" &&
+                        editForm.rating !== null;
+
                       return (
                         <svg
                           key={star}
                           className={`w-6 h-6 cursor-pointer ${
                             isFilled ? "text-yellow-400" : "text-gray-300"
-                          }`}
+                          } ${isRated ? "cursor-default" : ""}`}
                           fill="currentColor"
                           viewBox="0 0 20 20"
-                          onMouseEnter={() => setEditHoverRating(star)}
-                          onMouseLeave={() => setEditHoverRating(null)}
-                          onClick={() =>
-                            setEditForm((f) => ({ ...f, rating: star }))
+                          onMouseEnter={
+                            isRated ? undefined : () => setEditHoverRating(star)
+                          }
+                          onMouseLeave={
+                            isRated ? undefined : () => setEditHoverRating(null)
+                          }
+                          onClick={
+                            isRated
+                              ? undefined
+                              : () =>
+                                  setEditForm((f) => ({ ...f, rating: star }))
                           }
                         >
                           <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.967a1 1 0 00.95.69h4.178c.969 0 1.371 1.24.588 1.81l-3.385 2.46a1 1 0 00-.364 1.118l1.287 3.966c.3.922-.755 1.688-1.54 1.118l-3.385-2.46a1 1 0 00-1.175 0l-3.385 2.46c-.784.57-1.838-.196-1.539-1.118l1.287-3.966a1 1 0 00-.364-1.118L2.049 9.394c-.783-.57-.38-1.81.588-1.81h4.178a1 1 0 00.95-.69l1.286-3.967z" />
                         </svg>
                       );
                     })}
+                    {/* Clear button, only show if rated */}
+                    {editForm.rating !== "-" &&
+                      editForm.rating !== "" &&
+                      editForm.rating !== null && (
+                        <button
+                          type="button"
+                          className="ml-2 px-2 py-1 rounded bg-gray-200 text-gray-700 text-xs hover:bg-gray-300"
+                          onClick={() => {
+                            setEditForm((f) => ({ ...f, rating: "-" }));
+                            setEditHoverRating(null); // <-- This line resets the hover state
+                          }}
+                        >
+                          Clear
+                        </button>
+                      )}
                   </div>
                 </div>
                 {/* Buttons */}
@@ -892,11 +834,11 @@ export const SupplierModule = () => {
                   </span>
                 </h2>
                 <div className="overflow-x-auto">
-                  <div className="max-h-[340px] overflow-y-auto">
+                  <div className="max-h-[370px] overflow-y-auto">
                     <table className="min-w-full text-sm">
-                      <thead>
+                      <thead className="sticky top-0 bg-white z-10">
                         <tr className="text-left text-gray-500 border-b">
-                          <th className="py-2 pr-4 font-semibold">Supplier</th>
+                          <th className="py-6 pr-4 font-semibold">Supplier</th>
                           <th className="py-2 pr-4 font-semibold">Contact</th>
                           <th className="py-2 pr-4 font-semibold">Category</th>
                           <th className="py-2 pr-4 font-semibold">Rating</th>
@@ -913,7 +855,7 @@ export const SupplierModule = () => {
                       <tbody className="text-gray-900">
                         {suppliers.map((s, idx) => (
                           <tr
-                            key={idx}
+                            key={s.id || idx}
                             className="border-b last:border-b-0 hover:bg-blue-50 transition"
                           >
                             <td className="py-4 pr-4 align-top">
@@ -953,13 +895,15 @@ export const SupplierModule = () => {
                             </td>
                             <td className="py-4 pr-4 align-top flex items-center gap-1">
                               {s.rating}
-                              <svg
-                                className="w-4 h-4 text-yellow-400 inline"
-                                fill="currentColor"
-                                viewBox="0 0 20 20"
-                              >
-                                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.967a1 1 0 00.95.69h4.178c.969 0 1.371 1.24.588 1.81l-3.385 2.46a1 1 0 00-.364 1.118l1.287 3.966c.3.922-.755 1.688-1.54 1.118l-3.385-2.46a1 1 0 00-1.175 0l-3.385 2.46c-.784.57-1.838-.196-1.539-1.118l1.287-3.966a1 1 0 00-.364-1.118L2.049 9.394c-.783-.57-.38-1.81.588-1.81h4.178a1 1 0 00.95-.69l1.286-3.967z" />
-                              </svg>
+                              {s.rating !== "-" && (
+                                <svg
+                                  className="w-4 h-4 text-yellow-400 inline"
+                                  fill="currentColor"
+                                  viewBox="0 0 20 20"
+                                >
+                                  <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.967a1 1 0 00.95.69h4.178c.969 0 1.371 1.24.588 1.81l-3.385 2.46a1 1 0 00-.364 1.118l1.287 3.966c.3.922-.755 1.688-1.54 1.118l-3.385-2.46a1 1 0 00-1.175 0l-3.385 2.46c-.784.57-1.838-.196-1.539-1.118l1.287-3.966a1 1 0 00-.364-1.118L2.049 9.394c-.783-.57-.38-1.81.588-1.81h4.178a1 1 0 00.95-.69l1.286-3.967z" />
+                                </svg>
+                              )}
                             </td>
                             <td className="py-4 pr-4 align-top">
                               {s.totalOrders}
@@ -1011,77 +955,79 @@ export const SupplierModule = () => {
                   <span>
                     <img src={Boxx} className="inline-block w-7 h-7 mr-2" />
                   </span>
-                  All Inventory Orders{" "}
+                  All Ordered Items{" "}
                   <span className="[font-family:'Oxygen',Helvetica] font-normal text-gray-500 text-lg">
                     ({orders.length} Orders)
                   </span>
                 </h2>
-                <div className="overflow-hidden rounded-xl border border-gray-200 shadow-sm">
-                  <table className="w-full">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-6 py-4 text-left [font-family:'Inter',Helvetica] font-medium text-gray-700 text-sm">
-                          Order ID
-                        </th>
-                        <th className="px-6 py-4 text-left [font-family:'Inter',Helvetica] font-medium text-gray-700 text-sm">
-                          Item Name
-                        </th>
-                        <th className="px-6 py-4 text-left [font-family:'Inter',Helvetica] font-medium text-gray-700 text-sm">
-                          Quantity
-                        </th>
-                        <th className="px-6 py-4 text-left [font-family:'Inter',Helvetica] font-medium text-gray-700 text-sm">
-                          Supplier
-                        </th>
-                        <th className="px-6 py-4 text-left [font-family:'Inter',Helvetica] font-medium text-gray-700 text-sm">
-                          Unit Cost
-                        </th>
-                        <th className="px-6 py-4 text-left [font-family:'Inter',Helvetica] font-medium text-gray-700 text-sm">
-                          Status
-                        </th>
-                        <th className="px-6 py-4 text-left [font-family:'Inter',Helvetica] font-medium text-gray-700 text-sm">
-                          Expiration
-                        </th>
-                        <th className="px-6 py-4 text-left [font-family:'Inter',Helvetica] font-medium text-gray-700 text-sm">
-                          Category
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {orders.map((order, index) => (
-                        <tr
-                          key={order.id}
-                          className={`transition-colors ${
-                            index === 0 ? "bg-[#E6F7F9]" : "hover:bg-gray-50"
-                          }`}
-                        >
-                          <td className="px-6 py-4 [font-family:'Inter',Helvetica] font-medium text-gray-900">
-                            {order.id}
-                          </td>
-                          <td className="px-6 py-4 [font-family:'Inter',Helvetica] text-gray-900">
-                            {order.item}
-                          </td>
-                          <td className="px-6 py-4 [font-family:'Inter',Helvetica] text-gray-900">
-                            {order.quantity}
-                          </td>
-                          <td className="px-6 py-4 [font-family:'Inter',Helvetica] text-gray-900">
-                            {order.supplier}
-                          </td>
-                          <td className="px-6 py-4 [font-family:'Inter',Helvetica] font-medium text-gray-900">
-                            {order.unitCost}
-                          </td>
-                          <td className="px-6 py-4 [font-family:'Inter',Helvetica] text-gray-900">
-                            {order.status}
-                          </td>
-                          <td className="px-6 py-4 [font-family:'Inter',Helvetica] text-gray-900">
-                            {order.expiration}
-                          </td>
-                          <td className="px-6 py-4 [font-family:'Inter',Helvetica] text-gray-900 capitalize">
-                            {order.category}
-                          </td>
+                <div className="overflow-x-auto">
+                  <div className="max-h-[370px] overflow-y-auto">
+                    <table className="min-w-full text-sm">
+                      <thead className="sticky top-0 bg-white z-10">
+                        <tr className=" text-left text-gray-500 border-b-2">
+                          <th className="px-6 py-6 font-semibold whitespace-nowrap">
+                            Order ID
+                          </th>
+                          <th className="px-6 py-6 font-semibold">Item Name</th>
+                          <th className="px-6 py-6 font-semibold">Quantity</th>
+                          <th className="px-6 py-6 font-semibold">Supplier</th>
+                          <th className="px-6 py-6 font-semibold">Unit Cost</th>
+                          <th className="px-6 py-6 font-semibold">Status</th>
+                          <th className="px-6 py-6 font-semibold">
+                            Expiration
+                          </th>
+                          <th className="px-6 py-6 font-semibold">Category</th>
+                          <th className="px-6 py-6 font-semibold">
+                            Date Delivered
+                          </th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody className="text-gray-900">
+                        {orders
+                          .filter((order) =>
+                            selectedSupplier === "All Supplier"
+                              ? true
+                              : order.supplier === selectedSupplier
+                          )
+                          .sort((a, b) => b.created_at - a.created_at) // Newest first
+                          .map((order, index) => (
+                            <tr
+                              key={order.id}
+                              className="border-b-2 last:border-b-0 hover:bg-blue-50 transition"
+                            >
+                              <td className="px-6 py-6 align-top font-medium">
+                                {order.id}
+                              </td>
+                              <td className="px-6 py-6 align-top">
+                                {order.item}
+                              </td>
+                              <td className="px-6 py-6 align-top">
+                                {order.quantity}
+                              </td>
+                              <td className="px-6 py-6 align-top">
+                                {order.supplier}
+                              </td>
+                              <td className="px-6 py-6 align-top">{"—"}</td>
+                              <td className="px-6 py-6 align-top">
+                                {order.status}
+                              </td>
+                              <td className="px-6 py-6 align-top">
+                                {order.expiration}
+                              </td>
+                              <td className="px-6 py-6 align-top capitalize">
+                                {order.category}
+                              </td>
+                              <td className="px-6 py-6 align-top">
+                                {order.dateDelivered &&
+                                order.dateDelivered !== ""
+                                  ? order.dateDelivered
+                                  : "—"}
+                              </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </>
             )}
