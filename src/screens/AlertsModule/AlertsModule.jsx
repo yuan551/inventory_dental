@@ -110,41 +110,53 @@ export const AlertsModule = () => {
 		}
 	}, [alerts, activeTab]);
 
-	// Confirmation state for dismissing an alert
-	const [dismissConfirmId, setDismissConfirmId] = useState(null);
+	// Group alerts into two buckets: Today and Yesterday (Yesterday contains all non-Today items)
+	const groupedAlerts = useMemo(() => {
+		if (!filteredAlerts || filteredAlerts.length === 0) return [];
 
-	function requestDismiss(id) {
-		setDismissConfirmId(id);
-	}
+		const isSameDay = (d1, d2) => d1.getFullYear() === d2.getFullYear() && d1.getMonth() === d2.getMonth() && d1.getDate() === d2.getDate();
+		const today = new Date();
 
-	function cancelDismiss() {
-		setDismissConfirmId(null);
-	}
+		// priority ordering: high -> medium -> low
+		const priorityRank = (p) => (p === 'high' ? 0 : p === 'medium' ? 1 : 2);
 
-	function proceedDismiss() {
-		if (dismissConfirmId != null) {
-			dismissAlert(dismissConfirmId);
-			setDismissConfirmId(null);
+	const todayItems = [];
+		const yesterdayItems = []; // will hold everything that's not today per Option A
+
+		for (const a of filteredAlerts) {
+			const dt = new Date(a.datetime);
+			if (isSameDay(dt, today)) todayItems.push(a);
+			else yesterdayItems.push(a);
 		}
-	}
 
-	// Close modal on Escape
-	useEffect(() => {
-		if (dismissConfirmId == null) return;
-		const onKey = (e) => {
-			if (e.key === "Escape") cancelDismiss();
+		const sortGroup = (items) => {
+			items.sort((x, y) => {
+				if (x.unread === y.unread) {
+					const pr = priorityRank(x.priority) - priorityRank(y.priority);
+					if (pr === 0) return new Date(y.datetime) - new Date(x.datetime);
+					return pr;
+				}
+				return x.unread ? -1 : 1; // unread first
+			});
 		};
-		window.addEventListener("keydown", onKey);
-		return () => window.removeEventListener("keydown", onKey);
-	}, [dismissConfirmId]);
+
+		sortGroup(todayItems);
+		sortGroup(yesterdayItems);
+
+		const groups = [];
+	if (todayItems.length > 0) groups.push({ label: 'New', items: todayItems });
+		if (yesterdayItems.length > 0) groups.push({ label: 'Yesterday', items: yesterdayItems });
+
+		return groups;
+	}, [filteredAlerts]);
+
+	// (dismiss functionality removed) — the UI no longer supports dismissing alerts
 
 	function markAsRead(id) {
 		setAlerts((prev) => prev.map((a) => (a.id === id ? { ...a, unread: false } : a)));
 	}
 
-	function dismissAlert(id) {
-		setAlerts((prev) => prev.filter((a) => a.id !== id));
-	}
+	// dismissAlert removed — keeping alerts persistent in this UI until read
 
 	function markAllAsRead() {
 		setAlerts((prev) => prev.map((a) => ({ ...a, unread: false })));
@@ -198,7 +210,7 @@ export const AlertsModule = () => {
 						</div>
 
 						{/* Unread (Dashboard-style card) */}
-						<div style={{ backgroundColor: 'rgba(255,130,130,0.05)', borderColor: '#DA9361' }} className="rounded-xl shadow-sm h-36 p-6 flex items-center justify-between transition-shadow duration-150 hover:shadow-lg cursor-pointer border">
+						<div style={{ backgroundColor: 'rgba(255,130,130,0.05)', border: '1px solid #DA9361' }} className="rounded-xl shadow-sm h-36 p-6 flex items-center justify-between transition-shadow duration-150 hover:shadow-lg cursor-pointer focus:outline-none focus:ring-0">
 							<div>
 								<div className="text-sm text-black">Unread</div>
 								<div className="text-3xl font-semibold mt-2 text-black">{counts.unread}</div>
@@ -269,87 +281,46 @@ export const AlertsModule = () => {
 						</div>
 
 						<div className="mt-6 space-y-4">
-											{filteredAlerts.map((a) => (
-												<div key={a.id} tabIndex={0} className="bg-white rounded-xl border border-teal-200 p-0 shadow-sm hover:shadow-lg active:shadow-2xl focus:shadow-2xl transition-shadow duration-150 flex items-stretch cursor-pointer">
-													{/* left colored rounded bar */}
-													<div className="rounded-l-xl overflow-hidden">
-														<div className="w-3 h-full" style={{ background: a.type === "expiry" ? "#3b82f6" : "#f59e0b" }} />
-													</div>
-
-													<div className="flex-1 p-4 flex items-start gap-4">
-														{/* icon */}
-														<div className="flex-shrink-0 mt-1">
-															<img src={a.type === 'expiry' ? expiryIcon : stockIcon} alt={a.type === 'expiry' ? 'Expiry' : 'Stock'} className="w-6 h-6 object-contain" />
-														</div>
-
-														<div className="flex-1">
-															<div className="flex items-center gap-3">
-																<h3 className="text-xl font-bold text-gray-800">{a.title}</h3>
-																{a.unread && <span className="w-3 h-3 bg-blue-600 rounded-full" />}
-															</div>
-
-															<p className="text-sm text-gray-600 mt-2">{a.message}</p>
-
-															<div className="flex items-center gap-4 mt-3">
-																<div className="text-xs text-gray-500">{formatDate(a.datetime)}</div>
-																<div>
-																	<span className={`inline-block px-3 py-1 text-xs rounded-full border ${
-																		a.priority === "high" ? "bg-red-50 text-red-600 border-red-200" : a.priority === "medium" ? "bg-yellow-50 text-yellow-700 border-yellow-200" : "bg-gray-50 text-gray-700 border-gray-200"
-																	}`}>{a.priority.charAt(0).toUpperCase() + a.priority.slice(1)} Priority</span>
+											{groupedAlerts.map((g) => (
+													<div key={g.label}>
+														<div className="text-sm text-gray-500 mt-4 mb-2 font-medium">{g.label} ({g.items.length})</div>
+														{g.items.map((a) => (
+															<div key={a.id} tabIndex={0} className="bg-white rounded-xl border border-teal-200 p-0 shadow-sm hover:shadow-lg active:shadow-2xl focus:shadow-2xl transition-shadow duration-150 flex items-stretch cursor-pointer mb-3">
+																<div className="rounded-l-xl overflow-hidden">
+																	{/* Use red for expiry alerts so they stand out as 'expiring soon' */}
+																	<div className="w-3 h-full" style={{ background: a.type === "expiry" ? "#ef4444" : "#f59e0b" }} />
+																</div>
+																<div className="flex-1 p-4 flex items-start gap-4">
+																	<div className="flex-shrink-0 mt-1">
+																		<img src={a.type === 'expiry' ? expiryIcon : stockIcon} alt={a.type === 'expiry' ? 'Expiry' : 'Stock'} className="w-6 h-6 object-contain" />
+																	</div>
+																	<div className="flex-1">
+																		<div className="flex items-center gap-3">
+																			<h3 className="text-xl font-bold text-gray-800">{a.title}</h3>
+																			{a.unread && <span className="w-3 h-3 bg-blue-600 rounded-full" />}
+																		</div>
+																		<p className="text-sm text-gray-600 mt-2">{a.message}</p>
+																		<div className="flex items-center gap-4 mt-3">
+																			<div className="text-xs text-gray-500">{formatDate(a.datetime)}</div>
+																			<div>
+																				<span className={`inline-block px-3 py-1 text-xs rounded-full border ${
+																					a.priority === "high" ? "bg-red-50 text-red-600 border-red-200" : a.priority === "medium" ? "bg-yellow-50 text-yellow-700 border-yellow-200" : "bg-gray-50 text-gray-700 border-gray-200"
+																				}`}>{a.priority.charAt(0).toUpperCase() + a.priority.slice(1)} Priority</span>
+																			</div>
+																		</div>
+																	</div>
+																	<div className="flex items-center gap-3 pr-4 mt-4">
+																		{/* keep the check icon image but remove the colored/bordered square around it */}
+																		<button onClick={() => markAsRead(a.id)} aria-label={`Mark alert ${a.id} as read`} className="w-10 h-10 flex items-center justify-center rounded-md bg-transparent border border-transparent shadow-none">
+																			<img src={checkIcon} alt="Mark as read" className="w-4 h-4 object-contain" />
+																		</button>
+																	</div>
 																</div>
 															</div>
-														</div>
-
-														{/* right-aligned action buttons - vertically centered */}
-														<div className="flex items-center gap-3 pr-4 mt-4">
-															<button
-																onClick={() => markAsRead(a.id)}
-																aria-label={`Mark alert ${a.id} as read`}
-																className="w-10 h-10 flex items-center justify-center rounded-md border border-teal-200 bg-white hover:bg-teal-50 text-teal-700 shadow-sm"
-															>
-																<img src={checkIcon} alt="Mark as read" className="w-4 h-4 object-contain" />
-															</button>
-															<button
-																onClick={() => requestDismiss(a.id)}
-																aria-label={`Dismiss alert ${a.id}`}
-																className="w-10 h-10 flex items-center justify-center rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-gray-400"
-															>
-																<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
-																	<path d="M18 6L6 18M6 6l12 12" stroke="#9CA3AF" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-																</svg>
-															</button>
-														</div>
+														))}
 													</div>
-												</div>
 											))}
-
-												{dismissConfirmId != null && (() => {
-													const alertItem = alerts.find((x) => x.id === dismissConfirmId);
-													return (
-														<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-															<div className="bg-white rounded-2xl p-6 w-full max-w-sm relative shadow-2xl">
-																<button
-																	onClick={cancelDismiss}
-																	aria-label="Close"
-																	className="absolute right-3 top-3 w-8 h-8 rounded-full flex items-center justify-center text-gray-600 hover:bg-gray-100"
-																>
-																	<span className="text-xl">✕</span>
-																</button>
-																<div className="flex flex-col items-center text-center">
-																	<div className="w-16 h-16 rounded-full border-4 border-red-400 flex items-center justify-center mb-4">
-																		<span className="text-3xl text-red-500">!</span>
-																	</div>
-																	<h3 className="text-xl font-bold mb-2">Are you sure you want to remove{alertItem ? ` ${alertItem.title}` : ''}?</h3>
-																	<p className="text-sm text-gray-600 mb-6">This action cannot be undone.</p>
-																	<div className="flex gap-4">
-																		<button onClick={proceedDismiss} className="px-5 py-2 rounded-full bg-red-600 text-white">Remove</button>
-																		<button onClick={cancelDismiss} className="px-5 py-2 rounded-full bg-cyan-400 text-white">Cancel</button>
-																	</div>
-																</div>
-															</div>
-														</div>
-													);
-												})()}
+                                            
 
 							{filteredAlerts.length === 0 && (
 								<div className="bg-white rounded-lg border border-teal-100 p-6 text-center text-gray-500">No alerts to show.</div>
