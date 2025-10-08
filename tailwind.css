@@ -1,3 +1,6 @@
+/* Import fonts (Inter for headings, Oxygen for regular text, Source Code Pro for small/detailed text) */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Oxygen:wght@300;400;700&family=Source+Code+Pro:wght@400;600&display=swap');
+
 @tailwind components;
 @tailwind utilities;
 
@@ -204,6 +207,18 @@
   body {
     @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
+    /* Default site font */
+    font-family: 'Oxygen', Helvetica, Arial, sans-serif;
+  }
+
+  /* Heading and title defaults */
+  h1,h2,h3,h4,h5,h6 {
+    font-family: 'Inter', Helvetica, Arial, sans-serif;
+  }
+
+  /* Small detailed text (code-like UI bits) */
+  .small-mono, code, kbd, pre, .detail-text {
+    font-family: 'Source Code Pro', 'Courier New', monospace;
   }
 }
 
