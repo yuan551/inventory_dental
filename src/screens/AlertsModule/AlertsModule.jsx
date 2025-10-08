@@ -7,6 +7,21 @@ import expiryIcon from "../../assets/Alerts/Expiry Alerts.png";
 import stockIcon from "../../assets/Alerts/Stock Alerts.png";
 import checkIcon from "../../assets/Alerts/Check square.png";
 
+const palette = {
+  blue: "#78ADFD",
+  unreadBg: "#FFE6E6",
+  unreadBorder: "#DA9361",
+  unreadText: "#170707",
+  unreadIcon: "#2A7A6E",
+  expiryBorder: "#2A7A6E",
+  expiryIcon: "#B71C1C",
+  stockBorder: "#2A7A6E",
+  stockIcon: "#FBC02D",
+  highPriorityBg: "#FFF5F5",
+  highPriorityBorder: "#FF5C5C",
+  highPriorityText: "#F22727",
+};
+
 // AlertsModule
 // Renders the Alerts screen with summary cards, tabs, and a list of alerts.
 // This implementation uses mock data and local state to reproduce the visuals
@@ -14,111 +29,55 @@ import checkIcon from "../../assets/Alerts/Check square.png";
 // and actions like mark-as-read / dismiss / mark-all-as-read.
 
 export const AlertsModule = () => {
-	const [alerts, setAlerts] = useState([]);
-	const [activeTab, setActiveTab] = useState("all"); // all | unread | expiry | stock
+  const [alerts, setAlerts] = useState([]);
+  const [activeTab, setActiveTab] = useState("all");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try { return localStorage.getItem('sidebarCollapsed') === '1'; } catch { return false; }
+  });
+  // Add deleted state
+  const [deletedIds, setDeletedIds] = useState([]);
 
-	const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-		try { return localStorage.getItem('sidebarCollapsed') === '1'; } catch { return false; }
-	});
-	useEffect(() => {
-		const handler = (e) => setSidebarCollapsed(Boolean(e.detail?.collapsed));
-		window.addEventListener('sidebar:toggle', handler);
-		return () => window.removeEventListener('sidebar:toggle', handler);
-	}, []);
+  useEffect(() => {
+    const handler = (e) => setSidebarCollapsed(Boolean(e.detail?.collapsed));
+    window.addEventListener('sidebar:toggle', handler);
+    return () => window.removeEventListener('sidebar:toggle', handler);
+  }, []);
 
-	useEffect(() => {
-		// Mock data: in a real app this would come from an API or firebase.js
-		const now = new Date();
-		const sample = [
-			{
-				id: 1,
-				title: "Lidocaine 2% Expiring Soon",
-				type: "expiry",
-				message: "15 vials of Lidocaine 2% will expire in 5 days (Oct 5, 2024)",
-				datetime: new Date(now.getFullYear(), 9, 5, 14, 30).toISOString(),
-				priority: "high",
-				unread: true,
-			},
-			{
-				id: 2,
-				title: "Critical Stock Level",
-				type: "stock",
-				message: "Latex Gloves (Medium) is below minimum threshold (45/100)",
-				datetime: new Date(now.getFullYear(), 8, 23, 12, 15).toISOString(),
-				priority: "high",
-				unread: true,
-			},
-			{
-				id: 3,
-				title: "Low Stock Warning",
-				type: "stock",
-				message: "Dental Masks inventory is running low (78/150)",
-				datetime: new Date(now.getFullYear(), 8, 22, 16, 20).toISOString(),
-				priority: "medium",
-				unread: false,
-			},
-			{
-				id: 4,
-				title: "Articaine 4% Expiring Soon",
-				type: "expiry",
-				message: "25 cartridges of Articaine 4% will expire in 7 days (Sep 30, 2024)",
-				datetime: new Date(now.getFullYear(), 8, 30, 9, 45).toISOString(),
-				priority: "high",
-				unread: false,
-			},
-			{
-				id: 5,
-				title: "Critical Stock Level",
-				type: "stock",
-				message: "15 vials of Lidocaine 2% will expire in 5 days (Oct 5, 2024)",
-				datetime: new Date(now.getFullYear(), 9, 5, 11, 0).toISOString(),
-				priority: "high",
-				unread: true,
-			},
-			{
-				id: 6,
-				title: "Low Stock Warning",
-				type: "stock",
-				message: "Extra suction tips running low",
-				datetime: new Date(now.getFullYear(), 9, 1, 10, 0).toISOString(),
-				priority: "low",
-				unread: false,
-			},
-		];
+  useEffect(() => {
+    // Mock data
+    setAlerts([]); // <-- No alerts
+  }, []);
 
-		setAlerts(sample);
-	}, []);
+  const counts = useMemo(() => {
+    const total = alerts.length;
+    const unread = alerts.filter((a) => a.unread).length;
+    const expiry = alerts.filter((a) => a.type === "expiry").length;
+    const stock = alerts.filter((a) => a.type === "stock").length;
+    return { total, unread, expiry, stock };
+  }, [alerts]);
 
-	const counts = useMemo(() => {
-		const total = alerts.length;
-		const unread = alerts.filter((a) => a.unread).length;
-		const expiry = alerts.filter((a) => a.type === "expiry").length;
-		const stock = alerts.filter((a) => a.type === "stock").length;
-		return { total, unread, expiry, stock };
-	}, [alerts]);
+  const filteredAlerts = useMemo(() => {
+    switch (activeTab) {
+      case "unread":
+        return alerts.filter((a) => a.unread);
+      case "expiry":
+        return alerts.filter((a) => a.type === "expiry");
+      case "stock":
+        return alerts.filter((a) => a.type === "stock");
+      default:
+        return alerts;
+    }
+  }, [alerts, activeTab]);
 
-	const filteredAlerts = useMemo(() => {
-		switch (activeTab) {
-			case "unread":
-				return alerts.filter((a) => a.unread);
-			case "expiry":
-				return alerts.filter((a) => a.type === "expiry");
-			case "stock":
-				return alerts.filter((a) => a.type === "stock");
-			default:
-				return alerts;
-		}
-	}, [alerts, activeTab]);
+  // Group alerts into two buckets: Today and Yesterday (Yesterday contains all non-Today items)
+  const groupedAlerts = useMemo(() => {
+    if (!filteredAlerts || filteredAlerts.length === 0) return [];
 
-	// Group alerts into two buckets: Today and Yesterday (Yesterday contains all non-Today items)
-	const groupedAlerts = useMemo(() => {
-		if (!filteredAlerts || filteredAlerts.length === 0) return [];
+    const isSameDay = (d1, d2) => d1.getFullYear() === d2.getFullYear() && d1.getMonth() === d2.getMonth() && d1.getDate() === d2.getDate();
+    const today = new Date();
 
-		const isSameDay = (d1, d2) => d1.getFullYear() === d2.getFullYear() && d1.getMonth() === d2.getMonth() && d1.getDate() === d2.getDate();
-		const today = new Date();
-
-		// priority ordering: high -> medium -> low
-		const priorityRank = (p) => (p === 'high' ? 0 : p === 'medium' ? 1 : 2);
+    // priority ordering: high -> medium -> low
+    const priorityRank = (p) => (p === 'high' ? 0 : p === 'medium' ? 1 : 2);
 
 	const todayItems = [];
 		const yesterdayItems = []; // will hold everything that's not today per Option A
@@ -152,11 +111,15 @@ export const AlertsModule = () => {
 
 	// (dismiss functionality removed) — the UI no longer supports dismissing alerts
 
-	function markAsRead(id) {
-		setAlerts((prev) => prev.map((a) => (a.id === id ? { ...a, unread: false } : a)));
-	}
+  // Mark as read
+  function markAsRead(id) {
+    setAlerts((prev) => prev.map((a) => (a.id === id ? { ...a, unread: false } : a)));
+  }
 
-	// dismissAlert removed — keeping alerts persistent in this UI until read
+  // Delete alert
+  function deleteAlert(id) {
+    setDeletedIds((prev) => [...prev, id]);
+  }
 
 	function markAllAsRead() {
 		setAlerts((prev) => prev.map((a) => ({ ...a, unread: false })));
@@ -174,163 +137,235 @@ export const AlertsModule = () => {
 	}
 
 	return (
-		<div className="h-screen overflow-hidden flex bg-gray-100">
-			{/* Sidebar */}
-			<div className={`flex-shrink-0 transition-[width] duration-200 ${sidebarCollapsed ? 'w-20' : 'w-64'} h-full`}> 
-				{/* ensure sidebar fills height so it remains fixed while main content scrolls */}
+		<div className="min-h-screen flex bg-[#F5F5F5]">
+			{/* Sidebar - fixed so it doesn't scroll with content */}
+			<div
+				className={`flex-shrink-0 transition-[width] duration-200 ${sidebarCollapsed ? 'w-20' : 'w-64'} h-screen`}
+				style={{
+					position: "sticky",
+					left: 0,
+					top: 0,
+					zIndex: 20,
+					height: "100vh",
+					overflow: "hidden",
+					background: "#13B3C5",
+				}}
+			>
 				<DashboardSidebarSection currentPage="ALERTS" />
 			</div>
 
-			<div className="flex-1 flex flex-col">
+			{/* Main content - scrollable */}
+			<div className="flex-1 flex flex-col h-screen">
 				<AppHeader title="ALERTS" subtitle="Monitor low stock and expiration alerts" />
-
-				<main className="flex-1 overflow-auto p-8">
+				<main
+					className="flex-1 overflow-y-auto p-8"
+					style={{
+						height: "calc(100vh - 64px)", // adjust if AppHeader height changes
+						minHeight: 0,
+						background: "#F5F5F5",
+					}}
+				>
 					<div className="flex items-center justify-end mb-4">
 						<button
-							onClick={markAllAsRead}
-							className="px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-sm shadow-sm hover:bg-gray-100"
+							onClick={() => {
+                markAllAsRead();
+                alert("All alerts marked as read.");
+              }}
+							className="px-4 py-2 border border-[#2A7A6E] rounded-lg bg-white text-[#2A7A6E] text-sm shadow-sm hover:bg-[#E5F6F5] font-semibold"
 						>
 							Mark All as Read
 						</button>
 					</div>
 
+					{/* Summary Cards */}
 					<section className="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
-						{/* Total Alerts (Dashboard-style card) */}
-						<div className="bg-white rounded-xl shadow-sm border border-gray-200 h-36 p-6 flex items-center justify-between transition-shadow duration-150 hover:shadow-lg cursor-pointer">
-							<div>
-								<div className="text-sm text-gray-500">Total Alerts</div>
-								<div className="text-3xl font-semibold mt-2">{counts.total}</div>
-								<div className="text-xs text-gray-400 mt-1">Total across all categories</div>
-							</div>
-							<div className="flex items-center">
-								<div className="w-12 h-12 rounded-md flex items-center justify-center bg-gray-50 border border-gray-100">
-									<img src={totalIcon} alt="Total alerts" className="w-8 h-8 object-contain" />
-								</div>
-							</div>
-						</div>
+  {/* Total Alerts */}
+  <div className="bg-white rounded-xl border border-[#2A7A6E] h-32 p-5 flex items-center justify-between">
+    <div>
+      <div className="text-base text-[#170707] font-normal">Total Alerts</div>
+      <div className="text-2xl font-bold mt-2 text-[#170707]">{counts.total}</div>
+    </div>
+    <div>
+      <img src={totalIcon} alt="Total alerts" className="w-7 h-7 object-contain" />
+    </div>
+  </div>
+  {/* Unread */}
+  <div
+    className="rounded-xl h-32 p-5 flex items-center justify-between"
+    style={{
+      background: "#F5CFCF",
+      border: "1.5px solid #DA9361",
+    }}
+  >
+    <div>
+      <div className="text-base font-normal text-[#170707]">Unread</div>
+      <div className="text-2xl font-bold mt-2 text-[#170707]">{counts.unread}</div>
+    </div>
+    <div>
+      <img src={unreadIcon} alt="Unread" className="w-7 h-7 object-contain" />
+    </div>
+  </div>
+  {/* Expiry Alerts */}
+  <div className="bg-white rounded-xl border border-[#2A7A6E] h-32 p-5 flex items-center justify-between">
+    <div>
+      <div className="text-base text-[#170707] font-normal">Expiry Alerts</div>
+      <div className="text-2xl font-bold mt-2" style={{ color: "#B71C1C" }}>{counts.expiry}</div>
+    </div>
+    <div>
+      <img src={expiryIcon} alt="Expiry alerts" className="w-7 h-7 object-contain" />
+    </div>
+  </div>
+  {/* Stock Alerts */}
+  <div className="bg-white rounded-xl border border-[#2A7A6E] h-32 p-5 flex items-center justify-between">
+    <div>
+      <div className="text-base text-[#170707] font-normal">Stock Alerts</div>
+      <div className="text-2xl font-bold mt-2" style={{ color: "#FBC02D" }}>{counts.stock}</div>
+    </div>
+    <div>
+      <img src={stockIcon} alt="Stock alerts" className="w-7 h-7 object-contain" />
+    </div>
+  </div>
+</section>
 
-						{/* Unread (Dashboard-style card) */}
-						<div style={{ backgroundColor: 'rgba(255,130,130,0.05)', border: '1px solid #DA9361' }} className="rounded-xl shadow-sm h-36 p-6 flex items-center justify-between transition-shadow duration-150 hover:shadow-lg cursor-pointer focus:outline-none focus:ring-0">
-							<div>
-								<div className="text-sm text-black">Unread</div>
-								<div className="text-3xl font-semibold mt-2 text-black">{counts.unread}</div>
-								<div className="text-xs text-black/80 mt-1">New or unseen alerts</div>
-							</div>
-							<div className="flex items-center">
-								<div className="w-12 h-12 rounded-md flex items-center justify-center bg-transparent" style={{ border: '1px solid #DA9361' }}>
-									<img src={unreadIcon} alt="Unread" className="w-7 h-7 object-contain" />
-								</div>
-							</div>
-						</div>
+{/* Tabs */}
+<section className="mt-8">
+  <div
+    className="flex bg-[#F7F7F7] border border-[#2A7A6E] rounded-xl p-2 gap-0"
+    style={{ borderRadius: 16 }}
+  >
+    <button
+      onClick={() => setActiveTab("all")}
+      className={`flex-1 py-2 rounded-md font-semibold text-base transition ${activeTab === "all" ? "bg-[#D9D9D9] text-black" : "text-[#666]"}`}
+    >
+      All Alerts ({counts.total})
+    </button>
+    <button
+      onClick={() => setActiveTab("unread")}
+      className={`flex-1 py-2 rounded-md font-semibold text-base transition ${activeTab === "unread" ? "bg-[#D9D9D9] text-black" : "text-[#666]"}`}
+    >
+      Unread ({counts.unread})
+    </button>
+    <button
+      onClick={() => setActiveTab("expiry")}
+      className={`flex-1 py-2 rounded-md font-semibold text-base transition ${activeTab === "expiry" ? "bg-[#D9D9D9] text-black" : "text-[#666]"}`}
+    >
+      Expiry ({counts.expiry})
+    </button>
+    <button
+      onClick={() => setActiveTab("stock")}
+      className={`flex-1 py-2 rounded-md font-semibold text-base transition ${activeTab === "stock" ? "bg-[#D9D9D9] text-black" : "text-[#666]"}`}
+    >
+      Stock ({counts.stock})
+    </button>
+  </div>
 
-						{/* Expiry Alerts (Dashboard-style card) */}
-						<div className="bg-white rounded-xl shadow-sm border border-gray-200 h-36 p-6 flex items-center justify-between transition-shadow duration-150 hover:shadow-lg cursor-pointer">
-							<div>
-								<div className="text-sm text-gray-500">Expiry Alerts</div>
-								<div className="text-3xl font-semibold mt-2 text-red-500">{counts.expiry}</div>
-								<div className="text-xs text-gray-400 mt-1">Items expiring soon</div>
-							</div>
-							<div className="flex items-center">
-								<div className="w-12 h-12 rounded-md flex items-center justify-center bg-red-50 border border-red-100">
-									<img src={expiryIcon} alt="Expiry alerts" className="w-7 h-7 object-contain" />
-								</div>
-							</div>
-						</div>
-
-						{/* Stock Alerts (Dashboard-style card) */}
-						<div className="bg-white rounded-xl shadow-sm border border-gray-200 h-36 p-6 flex items-center justify-between transition-shadow duration-150 hover:shadow-lg cursor-pointer">
-							<div>
-								<div className="text-sm text-gray-500">Stock Alerts</div>
-								<div className="text-3xl font-semibold mt-2 text-yellow-600">{counts.stock}</div>
-								<div className="text-xs text-gray-400 mt-1">Low stock and critical items</div>
-							</div>
-							<div className="flex items-center">
-								<div className="w-12 h-12 rounded-md flex items-center justify-center bg-gray-50 border border-gray-100">
-									<img src={stockIcon} alt="Stock alerts" className="w-7 h-7 object-contain" />
-								</div>
-							</div>
-						</div>
-					</section>
-
-					<section className="mt-8">
-						<div className="bg-white rounded-lg border border-teal-100 p-2 flex gap-2">
-							<button
-								onClick={() => setActiveTab("all")}
-								className={`flex-1 py-3 rounded-md ${activeTab === "all" ? "bg-gray-200" : ""}`}
-							>
-								All Alerts ({counts.total})
-							</button>
-							<button
-								onClick={() => setActiveTab("unread")}
-								className={`flex-1 py-3 rounded-md ${activeTab === "unread" ? "bg-gray-200" : ""}`}
-							>
-								Unread ({counts.unread})
-							</button>
-							<button
-								onClick={() => setActiveTab("expiry")}
-								className={`flex-1 py-3 rounded-md ${activeTab === "expiry" ? "bg-gray-200" : ""}`}
-							>
-								Expiry ({counts.expiry})
-							</button>
-							<button
-								onClick={() => setActiveTab("stock")}
-								className={`flex-1 py-3 rounded-md ${activeTab === "stock" ? "bg-gray-200" : ""}`}
-							>
-								Stock ({counts.stock})
-							</button>
-						</div>
-
-						<div className="mt-6 space-y-4">
-											{groupedAlerts.map((g) => (
-													<div key={g.label}>
-														<div className="text-sm text-gray-500 mt-4 mb-2 font-medium">{g.label} ({g.items.length})</div>
-														{g.items.map((a) => (
-															<div key={a.id} tabIndex={0} className="bg-white rounded-xl border border-teal-200 p-0 shadow-sm hover:shadow-lg active:shadow-2xl focus:shadow-2xl transition-shadow duration-150 flex items-stretch cursor-pointer mb-3">
-																<div className="rounded-l-xl overflow-hidden">
-																	{/* Use red for expiry alerts so they stand out as 'expiring soon' */}
-																	<div className="w-3 h-full" style={{ background: a.type === "expiry" ? "#ef4444" : "#f59e0b" }} />
-																</div>
-																<div className="flex-1 p-4 flex items-start gap-4">
-																	<div className="flex-shrink-0 mt-1">
-																		<img src={a.type === 'expiry' ? expiryIcon : stockIcon} alt={a.type === 'expiry' ? 'Expiry' : 'Stock'} className="w-6 h-6 object-contain" />
-																	</div>
-																	<div className="flex-1">
-																		<div className="flex items-center gap-3">
-																			<h3 className="text-xl font-bold text-gray-800">{a.title}</h3>
-																			{a.unread && <span className="w-3 h-3 bg-blue-600 rounded-full" />}
-																		</div>
-																		<p className="text-sm text-gray-600 mt-2">{a.message}</p>
-																		<div className="flex items-center gap-4 mt-3">
-																			<div className="text-xs text-gray-500">{formatDate(a.datetime)}</div>
-																			<div>
-																				<span className={`inline-block px-3 py-1 text-xs rounded-full border ${
-																					a.priority === "high" ? "bg-red-50 text-red-600 border-red-200" : a.priority === "medium" ? "bg-yellow-50 text-yellow-700 border-yellow-200" : "bg-gray-50 text-gray-700 border-gray-200"
-																				}`}>{a.priority.charAt(0).toUpperCase() + a.priority.slice(1)} Priority</span>
-																			</div>
-																		</div>
-																	</div>
-																	<div className="flex items-center gap-3 pr-4 mt-4">
-																		{/* keep the check icon image but remove the colored/bordered square around it */}
-																		<button onClick={() => markAsRead(a.id)} aria-label={`Mark alert ${a.id} as read`} className="w-10 h-10 flex items-center justify-center rounded-md bg-transparent border border-transparent shadow-none">
-																			<img src={checkIcon} alt="Mark as read" className="w-4 h-4 object-contain" />
-																		</button>
-																	</div>
-																</div>
-															</div>
-														))}
-													</div>
-											))}
-                                            
-
-							{filteredAlerts.length === 0 && (
-								<div className="bg-white rounded-lg border border-teal-100 p-6 text-center text-gray-500">No alerts to show.</div>
-							)}
-						</div>
-					</section>
-				</main>
-			</div>
-		</div>
-	);
+  {/* Alerts List - Show all as "Yesterday" group only */}
+  <div className="mt-8">
+    <div
+      className="text-lg font-semibold text-[#707070] mb-2"
+      style={{
+        marginLeft: "8px",
+        marginBottom: "12px",
+      }}
+    >
+      Yesterday ({filteredAlerts.length})
+    </div>
+    <div>
+      {[
+        ...filteredAlerts.filter(a => !deletedIds.includes(a.id) && a.priority === "high"),
+        ...filteredAlerts.filter(a => !deletedIds.includes(a.id) && a.priority === "medium"),
+        ...filteredAlerts.filter(a => !deletedIds.includes(a.id) && a.priority === "low"),
+      ].map((a) => (
+        <div
+          key={a.id}
+          className="flex items-stretch rounded-2xl border relative"
+          style={{
+            background: a.unread ? "#fff" : "#F5F5F5",
+            border: `1.5px solid #78ADFD`,
+            borderLeft: a.unread ? `8px solid #78ADFD` : `1.5px solid #C3D6DF`,
+            minHeight: "80px",
+            padding: "20px",
+            alignItems: "center",
+            marginBottom: "16px",
+            transition: "background 0.2s, border-left 0.2s",
+          }}
+        >
+          <div className="flex items-center pr-4">
+            <div
+              className="w-10 h-10 rounded-md flex items-center justify-center"
+              style={{
+                background: "#F5F8FE",
+                border: `2px solid #78ADFD`,
+              }}
+            >
+              <img
+                src={a.type === "expiry" ? expiryIcon : stockIcon}
+                alt={a.type === "expiry" ? "Expiry" : "Stock"}
+                className="w-6 h-6 object-contain"
+              />
+            </div>
+          </div>
+          <div className="flex-1 pr-4">
+            <div className="flex items-center gap-2">
+              <h3 className="text-[24px] font-bold text-[#170707]">{a.title}</h3>
+              {a.unread && <span className="w-3 h-3 bg-[#78ADFD] rounded-full" />}
+            </div>
+            <p className="text-[17px] text-[#707070] mt-1">{a.message}</p>
+            <div className="flex items-center gap-4 mt-2">
+              <div className="text-[16px] text-[#707070]">{formatDate(a.datetime)}</div>
+              <span
+                className="inline-block px-4 py-1 text-[16px] rounded-full border font-bold"
+                style={{
+                  background: a.priority === "high"
+                    ? "#FFE6E6"
+                    : a.priority === "medium"
+                    ? "#FFF8E1"
+                    : "#F5F5F5",
+                  borderColor: a.priority === "high"
+                    ? "#F22727"
+                    : a.priority === "medium"
+                    ? "#FBC02D"
+                    : "#B0B0B0",
+                  color: a.priority === "high"
+                    ? "#F22727"
+                    : a.priority === "medium"
+                    ? "#FBC02D"
+                    : "#707070",
+                }}
+              >
+                {a.priority === "high"
+                  ? "High Priority"
+                  : a.priority === "medium"
+                  ? "Medium Priority"
+                  : "Low Priority"}
+              </span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {a.unread ? (
+              <button
+                onClick={() => markAsRead(a.id)}
+                aria-label={`Mark alert ${a.id} as read`}
+                className="w-8 h-8 flex items-center justify-center rounded-md bg-transparent border border-transparent shadow-none"
+              >
+                <img src={checkIcon} alt="Mark as read" className="w-5 h-5 object-contain" />
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ))}
+      {filteredAlerts
+        .filter(a => !deletedIds.includes(a.id))
+        .length === 0 && (
+        <div className="bg-white rounded-lg border border-[#78ADFD] p-4 text-center text-[#707070]">No alerts to show.</div>
+      )}
+    </div>
+  </div>
+      </section> {/* <-- Add this closing tag for <section> */}
+    </main>
+  </div>
+</div>
+  );
 };
 
 export default AlertsModule;

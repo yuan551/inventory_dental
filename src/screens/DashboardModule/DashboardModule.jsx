@@ -221,7 +221,22 @@ export const DashboardModule = () => {
       }
     };
 
+    // allow other parts of the app to request a refresh of the usage trend
+    const onUsageRefresh = async (e) => {
+      try {
+        // invalidate cache so we fetch latest logs
+        try { sessionStorage.removeItem(CACHE_KEY); } catch {}
+      } catch (err) {}
+      await load();
+    };
+
+    window.addEventListener('usage:refresh', onUsageRefresh);
+    // initial load
     load();
+
+    return () => {
+      window.removeEventListener('usage:refresh', onUsageRefresh);
+    };
   }, []);
 
   return (
