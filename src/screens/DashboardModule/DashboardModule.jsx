@@ -185,16 +185,23 @@ export const DashboardModule = () => {
           medicines: Array(6).fill(0),
           equipment: Array(6).fill(0),
         };
+        const normalizeCat = (c) => {
+          const v = (c || '').toString().trim().toLowerCase();
+          if (v === 'medicine' || v === 'med' || v === 'medicines') return 'medicines';
+          if (v === 'equipment' || v === 'equipments' || v === 'equip') return 'equipment';
+          if (v === 'consumable' || v === 'consumables' || v === 'consum') return 'consumables';
+          return v; // fallback — leave as-is
+        };
         stockOut.forEach((l) => {
           const dt = parseTs(l.timestamp);
           if (!dt || dt < start || dt >= end) return;
           const idx = (dt.getFullYear() - months[0].y) * 12 + (dt.getMonth() - months[0].m);
           if (idx < 0 || idx >= 6) return;
           const qty = Number(l.quantity || 0);
-          const cat = (l.category || '').toLowerCase();
-          if (cat.includes('consum')) buckets.consumables[idx] += qty;
-          else if (cat.includes('med')) buckets.medicines[idx] += qty;
-          else if (cat.includes('equip')) buckets.equipment[idx] += qty;
+          const cat = normalizeCat(l.category);
+          if (cat === 'consumables') buckets.consumables[idx] += qty;
+          else if (cat === 'medicines') buckets.medicines[idx] += qty;
+          else if (cat === 'equipment') buckets.equipment[idx] += qty;
         });
 
         const series = [
