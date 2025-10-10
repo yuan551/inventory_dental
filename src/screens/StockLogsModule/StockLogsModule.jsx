@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef, useLayoutEffect } from "react";
+import { createPortal } from "react-dom";
 import { DashboardSidebarSection } from "../DashboardModule/sections/DashboardSidebarSection/DashboardSidebarSection";
 import { PendingModal } from "../../components/modals/PendingModal";
 import { AppHeader } from "../../components/layout/AppHeader";
@@ -78,6 +79,7 @@ export const StockLogsModule = () => {
     const [outLogs, setOutLogs] = useState([]);
     const [accountsMap, setAccountsMap] = useState({});
     const [openStatusFor, setOpenStatusFor] = useState(null);
+    const [dropdownStyle, setDropdownStyle] = useState(null);
     const [search, setSearch] = useState("");
     // Removed Status Locked modal usage; only Ordered is locked silently
     const [showPendingModal, setShowPendingModal] = useState(false);
@@ -231,8 +233,10 @@ export const StockLogsModule = () => {
     // Close dropdown on outside click
     useEffect(() => {
         const handler = (e) => {
-            if (!e.target.closest(".status-dropdown-container")) {
+            // if click is not inside the status container or the portal dropdown, close
+            if (!e.target.closest(".status-dropdown-container") && !e.target.closest('.status-dropdown-portal')) {
                 setOpenStatusFor(null);
+                setDropdownStyle(null);
             }
         };
         if (openStatusFor !== null) {
@@ -412,6 +416,43 @@ export const StockLogsModule = () => {
         } catch (err) {
             console.error("Error updating status:", err);
             alert("Failed to update status. Please try again.");
+        }
+    };
+
+    // Helper: find a log by id across loaded arrays
+    const getLogById = (id) => {
+        if (!id) return null;
+        return (logs || []).concat(stockInLogs || [], outLogs || []).find(l => l.id === id) || null;
+    };
+
+    // Toggle status dropdown and compute portal position to avoid clipping by table scroll
+    const handleToggleStatus = (e, log) => {
+        if (!log) return;
+        if (isLockControlled(log) && !isUnlocked(log)) return; // respect lock
+
+        // If already open for this log, close it
+        if (openStatusFor === log.id) {
+            setOpenStatusFor(null);
+            setDropdownStyle(null);
+            return;
+        }
+
+        // Compute bounding rect from the clicked element (span)
+        try {
+            const el = e.currentTarget || e.target;
+            const rect = el.getBoundingClientRect();
+            const dropdownWidth = 160; // match w-40 (10rem ~= 160px)
+            const gap = 6; // small gap below the badge
+            let left = Math.round(rect.right - dropdownWidth);
+            if (left < 8) left = Math.round(rect.left); // avoid off-screen left
+            const top = Math.round(rect.bottom + gap);
+
+            setDropdownStyle({ top: `${top}px`, left: `${left}px`, minWidth: `${dropdownWidth}px` });
+            setOpenStatusFor(log.id);
+        } catch (err) {
+            // Fallback to simple toggle
+            setDropdownStyle(null);
+            setOpenStatusFor(log.id);
         }
     };
 
@@ -790,36 +831,40 @@ export const StockLogsModule = () => {
                                             {tab === 'in' && subTab !== 'stockin' && (
                                                 <td className="py-2 px-2 md:py-3 md:px-4 align-top">
                                                     <div className="flex items-center gap-2">
-                                                        {(() => {
-                                                            const base = "inline-flex items-center gap-1 px-2 md:px-3 py-1 rounded-full text-xs font-semibold border select-none";
-                                                            const size = { fontSize: "13px" };
-                                                            if (log.status === "Ordered") {
+                                                        <div className="relative status-dropdown-container">
+                                                            {/* Make the status badge itself the clickable trigger (preserve lock behavior) */}
+                                                            {(() => {
+                                                                const base = "inline-flex items-center gap-1 px-2 md:px-3 py-1 rounded-full text-xs font-semibold border select-none";
+                                                                const size = { fontSize: "13px" };
+                                                                if (log.status === "Ordered") {
+                                                                    return (
+                                                                        <span
+                                                                            className={`${base} bg-[#F4F4F4] text-gray-500 border-gray-300 ${isLocked ? '' : 'cursor-pointer hover:bg-gray-50'}`}
+                                                                            style={size}
+                                                                            title={isLocked ? (() => { const hrs = Math.ceil(lockMsLeft / (1000 * 60 * 60)); return `Locked (${hrs}h left).`; })() : 'Change Status'}
+                                                                            onClick={(e) => handleToggleStatus(e, log)}
+                                                                        >
+                                                                            <img src={lockstatusIcon} alt="Locked" className="w-3.5 h-3.5" />
+                                                                            Ordered
+                                                                        </span>
+                                                                    );
+                                                                }
+                                                                const map = { Pending: "bg-[#FEF3C7] text-[#92400E] border-[#FDE68A]", Received: "bg-green-100 text-green-700 border-green-300", Cancelled: "bg-red-100 text-red-600 border-red-300" };
+                                                                const cls = map[log.status] || "bg-gray-100 text-gray-600 border-gray-300";
                                                                 return (
-                                                                    <span className={`${base} bg-[#F4F4F4] text-gray-500 border-gray-300`} style={size}>
-                                                                        <img src={lockstatusIcon} alt="Locked" className="w-3.5 h-3.5" />
-                                                                        Ordered
+                                                                    <span
+                                                                        className={`${base} ${cls} ${isLocked ? '' : 'cursor-pointer hover:opacity-90'}`}
+                                                                        style={size}
+                                                                        title={isLocked ? (() => { const hrs = Math.ceil(lockMsLeft / (1000 * 60 * 60)); return `Locked (${hrs}h left).`; })() : 'Change Status'}
+                                                                        onClick={(e) => handleToggleStatus(e, log)}
+                                                                    >
+                                                                        {log.status}
                                                                     </span>
                                                                 );
-                                                            }
-                                                            const map = { Pending: "bg-[#FEF3C7] text-[#92400E] border-[#FDE68A]", Received: "bg-green-100 text-green-700 border-green-300", Cancelled: "bg-red-100 text-red-600 border-red-300" };
-                                                            const cls = map[log.status] || "bg-gray-100 text-gray-600 border-gray-300";
-                                                            return <span className={`${base} ${cls}`} style={size}>{log.status}</span>;
-                                                        })()}
-                                                        <div className="relative status-dropdown-container">
-                                                            <button
-                                                                className="p-1 rounded hover:bg-gray-100 disabled:opacity-40"
-                                                                title={isLocked ? (() => { const hrs = Math.ceil(lockMsLeft / (1000 * 60 * 60)); return `Locked (${hrs}h left).`; })() : "Change Status"}
-                                                                onClick={() => { if (isLocked) return; setOpenStatusFor(openStatusFor === log.id ? null : log.id); }}
-                                                                disabled={isLocked}
-                                                            >
-                                                                <svg width="18" height="18" fill="none" viewBox="0 0 18 18"><path d="M12.13 3.87a1.5 1.5 0 012.12 2.12l-7.06 7.06-2.12.71.71-2.12 7.06-7.06z" stroke="#00B6C9" strokeWidth="1.2" /></svg>
-                                                            </button>
+                                                            })()}
+
                                                             {openStatusFor === log.id && (
-                                                                <div className="absolute right-0 mt-1 w-40 bg-white rounded-lg shadow-lg border border-gray-200 z-30 py-1 dropdown-anim-in origin-top-right">
-                                                                    {['Received','Pending','Cancelled'].map(status => (
-                                                                        <button key={status} className="w-full text-left px-3 py-2 text-sm hover:bg-[#E9F7FA] text-gray-700 transition-colors" onClick={() => handleUpdateStatus(log, status)}>{status}</button>
-                                                                    ))}
-                                                                </div>
+                                                                <></>
                                                             )}
                                                         </div>
                                                     </div>
@@ -832,6 +877,21 @@ export const StockLogsModule = () => {
                         </table>
                     </div>
                 </div>
+
+                {/* Portal dropdown rendered at body level to avoid clipping inside scroll containers */}
+                {openStatusFor && typeof document !== 'undefined' && createPortal(
+                    <div className="status-dropdown-portal" style={{ position: 'fixed', zIndex: 9999 }}>
+                        <div style={{ position: 'fixed', top: dropdownStyle?.top || 0, left: dropdownStyle?.left || 0, minWidth: dropdownStyle?.minWidth || '160px' }} className="bg-white rounded-lg shadow-lg border border-gray-200 py-1">
+                            {['Received','Pending','Cancelled'].map(status => (
+                                <button key={status} className="w-full text-left px-3 py-2 text-sm hover:bg-[#E9F7FA] text-gray-700 transition-colors" onClick={() => {
+                                    const log = getLogById(openStatusFor);
+                                    if (log) handleUpdateStatus(log, status);
+                                }}>{status}</button>
+                            ))}
+                        </div>
+                    </div>,
+                    document.body
+                )}
 
                 {/* Status Locked Modal removed (silent lock for Ordered only) */}
 

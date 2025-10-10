@@ -870,28 +870,47 @@ export const InventoryModule = () => {
       const refBase = Date.now().toString(36).toUpperCase();
       const logs = summary
         .filter(s => (s.out || 0) > 0)
-        .map((s, i) => {
+          .map((s, i) => {
           // prefer perItemNotes mapping (set via dropdown / apply-to-all)
           const perNote = (perItemNotes && perItemNotes[s.id]) ? String(perItemNotes[s.id]).trim() : '';
           const batchNote = stockOutNotes.trim() || '';
           const notesForLog = perNote || batchNote;
           // try to read supplier from the in-memory dataMap for the originating category
           let supplierName = '';
+          let unitCostForLog = 0;
           try {
             const list = dataMap && dataMap[s.category] ? dataMap[s.category] : [];
             const found = list.find(r => r._id === s.id);
             supplierName = (found && found.supplier) ? found.supplier : '';
-          } catch (e) { supplierName = ''; }
+            // parse possible formatted unit cost values (e.g. "₱222.00" or "222.00")
+            const parsePossibleCost = (v) => {
+              try {
+                if (v === null || v === undefined) return 0;
+                if (typeof v === 'number') return v;
+                if (typeof v === 'string') {
+                  const cleaned = v.replace(/[^0-9.\-]/g, '');
+                  const m = cleaned.match(/-?\d+(?:\.\d+)?/);
+                  return m ? Number(m[0]) : 0;
+                }
+                return Number(v) || 0;
+              } catch (e) { return 0; }
+            };
+            if (found) {
+              unitCostForLog = parsePossibleCost(found.unit_cost ?? found.unitCost ?? found.unitPrice ?? found.unit_price ?? found.price ?? 0);
+            }
+          } catch (e) { supplierName = ''; unitCostForLog = 0; }
           return {
             category: s.category,
             item_name: s.name,
             quantity: Number(s.out || 0),
+            unit_cost: unitCostForLog,
             unit: s.unit,
             type: 'stock_out',
             created_by: auth?.currentUser?.uid || null,
             supplier: supplierName || '',
             reference: `SO-${refBase}-${i+1}`,
             timestamp: serverTimestamp(),
+            timestamp_local: Date.now(),
             notes: notesForLog,
           };
         });
@@ -901,6 +920,10 @@ export const InventoryModule = () => {
         } catch (e) {
           console.warn('Failed to write some stock logs', e);
         }
+        // Notify dashboard (and any other listeners) to refresh usage trend
+        try {
+          window.dispatchEvent(new CustomEvent('usage:refresh'));
+        } catch (e) {}
       }
     } catch (e) { console.error('Failed to persist stock out', e); }
 
