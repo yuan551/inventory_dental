@@ -17,6 +17,7 @@ import edit from "../../assets/edit.png";
 import boxx from "../../assets/boxx.png";
 import Frame from "../../assets/Frame.png";
 import location_on from "../../assets/location_on.png";
+
 const initialSuppliers = [
   {
     name: "MedSupply Co.",
@@ -862,7 +863,7 @@ export const SupplierModule = () => {
                               <div className="font-medium">{s.name}</div>
                               <div className="text-xs text-gray-500">
                                 <img
-                                  src={Location_on}
+                                  src={location_on}
                                   alt="User Icon"
                                   className="w-4 h-4 text-gray-500"
                                 />
