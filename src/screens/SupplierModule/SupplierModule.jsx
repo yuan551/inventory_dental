@@ -14,7 +14,7 @@ import Users from "../../assets/Users.png";
 import mark_email_unread from "../../assets/mark_email_unread.png";
 import PhoneIcon from "../../assets/PhoneIcon.png";
 import edit from "../../assets/edit.png";
-import Boxx from "../../assets/Boxx.png";
+import boxx from "../../assets/boxx.png";
 import Frame from "../../assets/Frame.png";
 import Location_on from "../../assets/Location_on.png";
 const initialSuppliers = [
