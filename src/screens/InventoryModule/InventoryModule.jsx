@@ -35,7 +35,7 @@ export const InventoryModule = () => {
   const [activeTab, setActiveTab] = useState("consumables");
   const [isNewOrderOpen, setIsNewOrderOpen] = useState(false);
   const [supplierOpen, setSupplierOpen] = useState(false);
-  const [supplierValue, setSupplierValue] = useState("MedSupply Co.");
+  const [supplierValue, setSupplierValue] = useState("Select Supplier");
   const [unitOpen, setUnitOpen] = useState(false);
   const [unitValue, setUnitValue] = useState("boxes");
   const [quantityValue, setQuantityValue] = useState("");
@@ -57,6 +57,23 @@ export const InventoryModule = () => {
   const [noteTarget, setNoteTarget] = useState('ALL'); // 'ALL' or item id
   const [noteOpen, setNoteOpen] = useState(false);
   const noteRef = useRef(null);
+  const [supplierList, setSupplierList] = useState([]);
+
+ useEffect(() => {
+  const fetchSuppliers = async () => {
+    try {
+      const snap = await getDocs(collection(db, "suppliers"));
+      const names = snap.docs
+        .map(doc => doc.data().supplier) // <-- use .supplier instead of .name
+        .filter(name => !!name);
+      setSupplierList(names);
+    } catch (e) {
+      console.error("Failed to fetch suppliers", e);
+      setSupplierList([]);
+    }
+  };
+  fetchSuppliers();
+}, []);
 
   // close dropdown on outside click
   useEffect(() => {
@@ -543,10 +560,9 @@ export const InventoryModule = () => {
   const isNewOrderValid = (() => {
     const name = (itemNameValue || '').toString().trim();
     const qty = Number((quantityValue || '').toString().trim() || 0);
-    const cost = (unitCostValue || '').toString().trim();
     const supplier = (supplierValue || '').toString().trim();
-    const unit = (unitValue || '').toString().trim();
-    return name.length > 0 && qty > 0 && cost.length > 0 && supplier.length > 0 && unit.length > 0;
+    // Only require name, quantity, and supplier
+    return name.length > 0 && qty > 0 && supplier.length > 0;
   })();
 
   const handleSave = async () => {
@@ -608,7 +624,7 @@ export const InventoryModule = () => {
       setItemNameValue("");
       setQuantityValue("");
       setUnitCostValue("");
-      setSupplierValue("MedSupply Co.");
+      setSupplierValue("Select Supplier");
       setUnitValue("boxes");
 
   setIsNewOrderOpen(false);
@@ -1287,19 +1303,31 @@ export const InventoryModule = () => {
               <div>
                 <label className="block text-sm text-gray-600 mb-1">Supplier Name <span className="text-red-500">*</span></label>
                 <div className="relative inv-supplier">
-                  <button type="button"
-                            onClick={() => setSupplierOpen((v) => { const next = !v; if (next) { setUnitOpen(false); setStatusOpen(false); setQaOpen(false);} return next; })}
-                          className="w-full h-10 pl-4 pr-9 rounded-full border border-gray-300 text-left focus:border-[#00b7c2] focus:ring-2 focus:ring-[#00b7c2]/20">
+                  <button
+                    type="button"
+                    onClick={() => setSupplierOpen((v) => {
+                      const next = !v;
+                      if (next) { setUnitOpen(false); setStatusOpen(false); setQaOpen(false);}
+                      return next;
+                    })}
+                    className="w-full h-10 pl-4 pr-9 rounded-full border border-gray-300 text-left focus:border-[#00b7c2] focus:ring-2 focus:ring-[#00b7c2]/20"
+                  >
                     <span className="text-gray-700">{supplierValue}</span>
                     <ChevronDownIcon className={`absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 transition-transform ${supplierOpen ? 'rotate-180' : ''}`} />
                   </button>
-         <div className={`${supplierOpen ? 'opacity-100 scale-100 translate-y-0 dropdown-anim-in' : 'opacity-0 scale-95 -translate-y-1 pointer-events-none'} absolute z-10 mt-2 w-full bg-white rounded-xl shadow-xl ring-1 ring-black/5 transition-all duration-150 origin-top overflow-hidden`}
-                       onMouseLeave={() => setSupplierOpen(false)}>
-                    {['MedSupply Co.', 'DentalCare Ltd.', 'SafeMed Inc'].map(opt => (
-                      <div key={opt}
-                           onClick={() => { setSupplierValue(opt); setSupplierOpen(false); }}
-                           className={`px-4 py-2 cursor-pointer hover:bg-gray-50 ${supplierValue === opt ? 'text-[#00b7c2] font-medium' : 'text-gray-700'}`}> {opt} </div>
-                    ))}
+                  <div className={`${supplierOpen ? 'opacity-100 scale-100 translate-y-0 dropdown-anim-in' : 'opacity-0 scale-95 -translate-y-1 pointer-events-none'} absolute z-10 mt-2 w-full bg-white rounded-xl shadow-xl ring-1 ring-black/5 transition-all duration-150 origin-top overflow-hidden`}
+                    onMouseLeave={() => setSupplierOpen(false)}>
+                    {supplierList.length === 0 ? (
+                      <div className="px-4 py-2 text-gray-400">No suppliers found</div>
+                    ) : (
+                      supplierList.map(opt => (
+                        <div key={opt}
+                          onClick={() => { setSupplierValue(opt); setSupplierOpen(false); }}
+                          className={`px-4 py-2 cursor-pointer hover:bg-gray-50 ${supplierValue === opt ? 'text-[#00b7c2] font-medium' : 'text-gray-700'}`}>
+                          {opt}
+                        </div>
+                      ))
+                    )}
                   </div>
                 </div>
               </div>
@@ -1315,38 +1343,18 @@ export const InventoryModule = () => {
                 />
               </div>
               <div>
-                <label className="block text-sm text-gray-600 mb-1">Units <span className="text-red-500">*</span> <span className="text-xs text-gray-400">(grams, vials, etc.)</span></label>
+                <label className="block text-sm text-gray-600 mb-1">Units <span className="text-red-500">*</span></label>
                 <div className="relative inv-unit">
-                  <button type="button"
-                          onClick={() => setUnitOpen((v) => { const next = !v; if (next) { setSupplierOpen(false); setStatusOpen(false); setQaOpen(false);} return next; })}
-                          className="w-full h-10 pl-4 pr-9 rounded-full border border-gray-300 text-left focus:border-[#00b7c2] focus:ring-2 focus:ring-[#00b7c2]/20">
-                    <span className="text-gray-700">{unitValue}</span>
-                    <ChevronDownIcon className={`absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 transition-transform ${unitOpen ? 'rotate-180' : ''}`} />
-                  </button>
-         <div className={`${unitOpen ? 'opacity-100 scale-100 translate-y-0 dropdown-anim-in' : 'opacity-0 scale-95 -translate-y-1 pointer-events-none'} absolute z-10 mt-2 w-full bg-white rounded-xl shadow-xl ring-1 ring-black/5 transition-all duration-150 origin-top overflow-hidden`}
-                       onMouseLeave={() => setUnitOpen(false)}>
-                    {['boxes', 'packs', 'units', 'vials'].map(opt => (
-                      <div key={opt}
-                           onClick={() => { setUnitValue(opt); setUnitOpen(false); }}
-                           className={`px-4 py-2 cursor-pointer hover:bg-gray-50 ${unitValue === opt ? 'text-[#00b7c2] font-medium' : 'text-gray-700'}`}> {opt} </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              <div className="col-span-2">
-                <label className="block text-sm text-gray-600 mb-1">Unit Cost <span className="text-red-500">*</span></label>
-                <div className="relative">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 select-none pointer-events-none">₱</span>
-                  <Input
-                    className="h-10 pl-10 rounded-full"
-                    value={unitCostValue}
-                    onChange={handleUnitCostChange}
-                    inputMode="decimal"
-                    pattern="^\\d*(\\.\\d{0,2})?$"
+                  <input
+                    type="text"
+                    value="Boxes"
+                    disabled
+                    className="w-full h-10 pl-4 pr-9 rounded-full border border-gray-300 bg-gray-100 text-gray-500 cursor-not-allowed"
+                    readOnly
                   />
                 </div>
               </div>
+
             </div>
 
             <div className="mt-6 flex flex-col items-center gap-2">
