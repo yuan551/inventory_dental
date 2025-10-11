@@ -16,7 +16,7 @@ import PhoneIcon from "../../assets/PhoneIcon.png";
 import edit from "../../assets/edit.png";
 import boxx from "../../assets/boxx.png";
 import Frame from "../../assets/Frame.png";
-import Location_on from "../../assets/Location_on.png";
+import location_on from "../../assets/location_on.png";
 const initialSuppliers = [
   {
     name: "MedSupply Co.",
