@@ -14,9 +14,10 @@ import Users from "../../assets/Users.png";
 import mark_email_unread from "../../assets/mark_email_unread.png";
 import PhoneIcon from "../../assets/PhoneIcon.png";
 import edit from "../../assets/edit.png";
-import Boxx from "../../assets/Boxx.png";
+import boxx from "../../assets/boxx.png";
 import Frame from "../../assets/Frame.png";
-import Location_on from "../../assets/Location_on.png";
+import location_on from "../../assets/location_on.png";
+
 const initialSuppliers = [
   {
     name: "MedSupply Co.",
@@ -862,7 +863,7 @@ export const SupplierModule = () => {
                               <div className="font-medium">{s.name}</div>
                               <div className="text-xs text-gray-500">
                                 <img
-                                  src={Location_on}
+                                  src={location_on}
                                   alt="User Icon"
                                   className="w-4 h-4 text-gray-500"
                                 />
