@@ -8,6 +8,8 @@ import {
   onSnapshot,
   addDoc,
   serverTimestamp,
+  deleteDoc,
+  doc,
 } from "firebase/firestore";
 import { ChevronDown as ChevronDownIcon } from "lucide-react";
 import Users from "../../assets/Users.png";
@@ -108,8 +110,25 @@ export const SupplierModule = () => {
   const [editHoverRating, setEditHoverRating] = useState(null);
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [showRemoveSuccess, setShowRemoveSuccess] = useState(false);
   const [suppliers, setSuppliers] = useState(initialSuppliers);
   const [selectedSupplier, setSelectedSupplier] = useState("All Supplier");
+  const [nameError, setNameError] = useState("");
+  const [supplierFilterOpen, setSupplierFilterOpen] = useState(false);
+  const [editCategoryOpen, setEditCategoryOpen] = useState(false);
+
+  const supplierTotalQuantities = suppliers.reduce((acc, supplier) => {
+    const total = orders
+      .filter((order) => order.supplier === supplier.name)
+      .reduce((sum, order) => {
+        // Extract numeric quantity from order.quantity (e.g., "5 pcs")
+        const match = String(order.quantity).match(/^(\d+)/);
+        const qty = match ? parseInt(match[1], 10) : 0;
+        return sum + qty;
+      }, 0);
+    acc[supplier.name] = total;
+    return acc;
+  }, {});
 
   const [form, setForm] = useState({
     name: "",
@@ -121,7 +140,7 @@ export const SupplierModule = () => {
     rating: "-",
     totalOrders: "",
     lastOrder: "",
-    status: "",
+    status: "Inactive",
   });
   const [hoverRating, setHoverRating] = useState(null);
 
@@ -157,6 +176,18 @@ export const SupplierModule = () => {
 
   const handleAddSupplier = async (e) => {
     e.preventDefault();
+
+    setNameError(""); // Reset name error
+
+    // Check for duplicate supplier name (case-insensitive)
+    const nameExists = suppliers.some(
+      (s) => s.name.trim().toLowerCase() === form.name.trim().toLowerCase()
+    );
+    if (nameExists) {
+      setNameError("Supplier already exists");
+      return;
+    }
+
     if (!validateEmail(form.email)) return;
 
     const payload = {
@@ -187,7 +218,7 @@ export const SupplierModule = () => {
       rating: "",
       totalOrders: "",
       lastOrder: "",
-      status: "Active",
+      status: "Inactive",
     });
     setShowForm(false);
     setShowSuccessModal(true);
@@ -214,24 +245,43 @@ export const SupplierModule = () => {
           subtitle="Manage your suppliers and vendor relationships"
         />
 
-        <div className="flex w-full max-w-full mx-auto mt-6 justify-end items-center gap-5">
-          {/* Dropdown button for supplier filter */}
-          <select
-            className="border-2 border-[#00bfc8] [font-family:'Oxygen',Helvetica] rounded-full px-4 py-2 font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#00bfc8]"
-            value={selectedSupplier}
-            onChange={(e) => setSelectedSupplier(e.target.value)}
-            style={{ minWidth: 160 }}
-          >
-            <option value="All Supplier">All Supplier</option>
-            {[...new Set(suppliers.map((s) => s.name))]
-              .filter((name) => name && name !== "")
-              .map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-          </select>
-
+      <div className="flex w-full max-w-full mx-auto mt-6 justify-end items-center gap-5">
+        {/* Only show supplier filter when Purchase Orders tab is active */}
+        {activeTab === "orders" && (
+          <div className="relative inv-supplier">
+            <button
+              type="button"
+              onClick={() => setSupplierFilterOpen((v) => !v)}
+              className="w-full h-10 pl-4 pr-9 rounded-full border border-[#00bfc8] text-left focus:border-[#00bfc8] focus:ring-2 focus:ring-[#00bfc8]/20 font-medium text-gray-700"
+              style={{ minWidth: 160 }}
+            >
+              <span className="text-gray-700">{selectedSupplier}</span>
+              <ChevronDownIcon className={`absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 transition-transform ${supplierFilterOpen ? 'rotate-180' : ''}`} />
+            </button>
+              <div
+                className={`${supplierFilterOpen ? 'opacity-100 scale-100 translate-y-0 dropdown-anim-in' : 'opacity-0 scale-95 -translate-y-1 pointer-events-none'} absolute z-30 mt-2 w-full bg-white rounded-xl shadow-xl ring-1 ring-black/5 transition-all duration-150 origin-top overflow-hidden`}
+                onMouseLeave={() => setSupplierFilterOpen(false)}
+              > 
+              <div
+                className="px-4 py-2 cursor-pointer hover:bg-gray-50"
+                onClick={() => { setSelectedSupplier("All Supplier"); setSupplierFilterOpen(false); }}
+              >
+                All Supplier
+              </div>
+              {[...new Set(suppliers.map((s) => s.name))]
+                .filter((name) => name && name !== "")
+                .map((name) => (
+                  <div
+                    key={name}
+                    onClick={() => { setSelectedSupplier(name); setSupplierFilterOpen(false); }}
+                    className={`px-4 py-2 cursor-pointer hover:bg-gray-50 ${selectedSupplier === name ? 'text-[#00bfc8] font-medium' : 'text-gray-700'}`}
+                  >
+                    {name}
+                  </div>
+                ))}
+            </div>
+          </div>
+        )}
           {/* Add Supplier Button */}
           <button
             className="flex items-center gap-2 bg-[#00bfc8] text-white rounded-full px-5 py-2 mr-7 [font-family:'Oxygen',Helvetica] font-medium shadow hover:bg-[#00a7b0] transition"
@@ -320,6 +370,7 @@ export const SupplierModule = () => {
                   </span>
                   Add Supplier
                 </h3>
+
                 <button
                   className="text-white text-2xl font-bold hover:text-gray-200"
                   onClick={() => {
@@ -335,9 +386,10 @@ export const SupplierModule = () => {
                       rating: "",
                       totalOrders: "",
                       lastOrder: "",
-                      status: "Active",
+                      status: "Inactive",
                     });
                     setEmailError("");
+                    setNameError("");
                   }}
                   aria-label="Close"
                 >
@@ -350,7 +402,7 @@ export const SupplierModule = () => {
                 onSubmit={handleAddSupplier}
                 className="px-12 py-10 space-y-6"
               >
-                <h2 className="text-[#00bfc8] text-2xl font-bold [font-family:'Inter',Helvetica] mb-8">
+                <h2 className="text-[#00bfc8] text-2xl font-bold [font-family:'Inter',Helvetica] ">
                   Add Supplier
                 </h2>
                 <div className="grid grid-cols-2 gap-x-12 gap-y-10 mb-4">
@@ -359,13 +411,20 @@ export const SupplierModule = () => {
                       Supplier Name
                     </label>
                     <input
-                      className="w-full border-2 border-[#00bfc8] rounded-full px-5 py-3 focus:outline-none [font-family:'Inter',Helvetica] text-gray-700"
+                      className={`w-full border-2 rounded-full px-5 py-3 focus:outline-none [font-family:'Inter',Helvetica] text-gray-700 ${
+                        nameError ? "border-red-500" : "border-[#00bfc8]"
+                      }`}
                       name="name"
                       placeholder="Supplier Name"
                       value={form.name}
                       onChange={handleInputChange}
                       required
                     />
+                    {nameError && (
+                      <div className="text-red-500 text-sm px-4 mt-1 font-semibold">
+                        {nameError}
+                      </div>
+                    )}
                   </div>
                   <div>
                     <label className="opacity-60 block [font-family:'Oxygen',Helvetica] text-gray-700 text-xl mb-3">
@@ -412,29 +471,45 @@ export const SupplierModule = () => {
                       onBlur={() => validateEmail(form.email)}
                       required
                     />
-                    {emailError && (
-                      <p className="text-red-500 text-sm px-4 mt-1">
-                        {emailError}
-                      </p>
-                    )}
+                  {emailError && (
+                    <p className="text-red-500 text-sm">
+                      {emailError}
+                    </p>
+                  )}
                   </div>
                   <div>
                     <label className="opacity-60 block [font-family:'Oxygen',Helvetica] text-gray-700 text-xl mb-3">
                       Category
                     </label>
-                    <select
-                      className="w-full border-2 border-[#00bfc8] rounded-full px-5 py-3 focus:outline-none [font-family:'Inter',Helvetica] text-gray-700"
-                      name="category"
-                      value={form.category}
-                      onChange={handleInputChange}
-                      required
-                    >
-                      <option value=""> Select Category</option>
-                      <option value="General Supplies">General Supplies</option>
-                      <option value="Pharmaceuticals">Pharmaceuticals</option>
-                      <option value="Equipment">Equipment</option>
-                      <option value="Safety Equipment">Safety Equipment</option>
-                    </select>
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setEditCategoryOpen((v) => !v)}
+                        className="w-full h-12 pl-4 pr-9 rounded-full border border-[#00bfc8] text-left focus:border-[#00bfc8] focus:ring-2 focus:ring-[#00bfc8]/20 font-medium text-gray-700"
+                      >
+                        <span className="text-gray-700">
+                          {form.category || "Select Category"}
+                        </span>
+                        <ChevronDownIcon className={`absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 transition-transform ${editCategoryOpen ? 'rotate-180' : ''}`} />
+                      </button>
+                      <div
+                        className={`${editCategoryOpen ? 'opacity-100 scale-100 translate-y-0 dropdown-anim-in' : 'opacity-0 scale-95 -translate-y-1 pointer-events-none'} absolute z-30 mt-2 w-full bg-white rounded-xl shadow-xl ring-1 ring-black/5 transition-all duration-150 origin-top overflow-hidden`}
+                        onMouseLeave={() => setEditCategoryOpen(false)}
+                      >
+                        {["General Supplies", "Pharmaceuticals", "Equipment", "Safety Equipment"].map((cat) => (
+                          <div
+                            key={cat}
+                            onClick={() => {
+                              setForm((f) => ({ ...f, category: cat }));
+                              setEditCategoryOpen(false);
+                            }}
+                            className={`px-4 py-2 cursor-pointer hover:bg-gray-50 ${form.category === cat ? 'text-[#00bfc8] font-medium' : 'text-gray-700'}`}
+                          >
+                            {cat}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                   <div>
                     <label className="opacity-60 block [font-family:'Oxygen',Helvetica] text-gray-700 text-xl mb-3">
@@ -459,69 +534,58 @@ export const SupplierModule = () => {
             </div>
           </div>
         )}
-        {showRemoveConfirm && (
+
+        {showSuccessModal && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black bg-opacity-50">
             <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-sm relative flex flex-col items-center">
               {/* Close X button */}
               <button
                 className="absolute top-5 right-5 text-gray-500 hover:text-gray-700 text-2xl font-bold"
-                onClick={() => setShowRemoveConfirm(false)}
+                onClick={() => setShowSuccessModal(false)}
                 aria-label="Close"
               >
                 ×
               </button>
-              {/* Red Exclamation Icon */}
+              {/* Green Check Icon */}
               <div className="flex justify-center mb-4 mt-2">
                 <svg className="w-16 h-16" viewBox="0 0 64 64" fill="none">
                   <circle
                     cx="32"
                     cy="32"
                     r="28"
-                    stroke="#E11D48"
+                    stroke="#22C55E"
                     strokeWidth="4"
                   />
-                  <text
-                    x="32"
-                    y="46"
-                    textAnchor="middle"
-                    fontSize="40"
-                    fill="#E11D48"
-                    fontWeight="bold"
-                  >
-                    !
-                  </text>
+                  <path
+                    d="M20 34l8 8 16-16"
+                    stroke="#22C55E"
+                    strokeWidth="4"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    fill="none"
+                  />
                 </svg>
               </div>
               {/* Message */}
-              <h3 className="text-center text-xl font-semibold text-gray-900 mb-2 mt-2">
-                Are you sure you want to
+              <h3 className="[font-family:'Inter',Helvetica] text-center text-xl font-bold text-gray-900 mb-2 mt-2">
+                Supplier Added
                 <br />
-                remove {editForm?.name}?
+                Successfully
               </h3>
-              {/* Buttons */}
-              <div className="flex gap-4 mt-6 w-full">
-                <button
-                  className="flex-1 bg-red-600 text-white rounded-full px-6 py-2.5 font-semibold shadow hover:bg-red-700 transition text-lg"
-                  onClick={() => {
-                    setSuppliers(
-                      suppliers.filter((_, i) => i !== editForm.index)
-                    );
-                    setShowRemoveConfirm(false);
-                    setShowEditModal(false);
-                  }}
-                >
-                  Remove
-                </button>
-                <button
-                  className="flex-1 bg-[#00bfc8] text-white rounded-full px-6 py-2.5 font-semibold shadow hover:bg-[#00a7b0] transition text-lg"
-                  onClick={() => setShowRemoveConfirm(false)}
-                >
-                  Cancel
-                </button>
-              </div>
+              <p className="[font-family:'Inter',Helvetica] text-center text-gray-700 mb-4">
+                A new Supplier has been successfully added.
+              </p>
+              {/* Done Button */}
+              <button
+                className="w-40 bg-[#00bfc8] text-white rounded-full px-10 py-2.5 [font-family:'Inter',Helvetica] font-semibold shadow hover:bg-[#00a7b0] transition text-lg"
+                onClick={() => setShowSuccessModal(false)}
+              >
+                Done
+              </button>
             </div>
           </div>
         )}
+
         {showEditModal && editForm && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-30">
             <div className="bg-white rounded-2xl shadow-lg p-0 w-full max-w-xl relative">
@@ -586,11 +650,11 @@ export const SupplierModule = () => {
               >
                 <div className="grid grid-cols-2 gap-x-8 gap-y-7 mb-4 ml-2 mr-2">
                   <div>
-                    <label className=" opacity-60 block [font-family:'Oxygen',Helvetica] text-gray-700 text-xl  mb-3">
+                    <label className=" opacity-60 block [font-family:'Oxygen',Helvetica] text-gray-700 text-xl mb-3">
                       Supplier Name
                     </label>
                     <input
-                      className="w-full border-2 border-[#00bfc8] rounded-full px-4 py-2 focus:outline-none [font-family:'Inter',Helvetica] text-gray-700"
+                      className="w-full border-2 border-[#00bfc8] rounded-full px-5 py-3 focus:outline-none [font-family:'Inter',Helvetica] text-gray-700 text-sm"
                       name="name"
                       placeholder="Pharma Corp."
                       value={editForm.name}
@@ -605,7 +669,7 @@ export const SupplierModule = () => {
                       Contact Person
                     </label>
                     <input
-                      className="w-full border-2 border-[#00bfc8] rounded-full px-4 py-2 focus:outline-none [font-family:'Inter',Helvetica] text-gray-700"
+                      className="w-full border-2 border-[#00bfc8] rounded-full px-5 py-3 focus:outline-none [font-family:'Inter',Helvetica] text-gray-700 text-sm"
                       name="contactName"
                       placeholder="Contact Person"
                       value={editForm.contactName}
@@ -619,11 +683,11 @@ export const SupplierModule = () => {
                     />
                   </div>
                   <div>
-                    <label className=" opacity-60 block [font-family:'Oxygen',Helvetica] text-gray-700 text-xl  mb-3">
+                    <label className=" opacity-60 block [font-family:'Oxygen',Helvetica] text-gray-700 text-xl  py-3">
                       Contact Number
                     </label>
                     <input
-                      className="w-full border-2 border-[#00bfc8] rounded-full px-4 py-2 focus:outline-none [font-family:'Inter',Helvetica] text-gray-700"
+                      className="w-full border-2 border-[#00bfc8] rounded-full px-5 py-3 focus:outline-none [font-family:'Inter',Helvetica] text-gray-700 text-sm"
                       name="phone"
                       placeholder="2864834732"
                       value={editForm.phone}
@@ -640,11 +704,11 @@ export const SupplierModule = () => {
                     />
                   </div>
                   <div>
-                    <label className=" opacity-60 block [font-family:'Oxygen',Helvetica] text-gray-700 text-xl  mb-3">
+                    <label className=" opacity-60 block [font-family:'Oxygen',Helvetica] text-gray-700 text-xl  py-3">
                       Email Address
                     </label>
                     <input
-                      className="w-full border-2 border-[#00bfc8] rounded-full px-4 py-2 focus:outline-none [font-family:'Inter',Helvetica] text-gray-700"
+                     className="w-full border-2 border-[#00bfc8] rounded-full px-5 py-3 focus:outline-none [font-family:'Inter',Helvetica] text-gray-700 text-sm"
                       name="email"
                       placeholder="Email Address"
                       value={editForm.email}
@@ -655,11 +719,11 @@ export const SupplierModule = () => {
                     />
                   </div>
                   <div>
-                    <label className=" opacity-60 block [font-family:'Oxygen',Helvetica] text-gray-700 text-xl  mb-3">
+                    <label className=" opacity-60 block [font-family:'Oxygen',Helvetica] text-gray-700 text-xl  py-3">
                       Category
                     </label>
                     <select
-                      className="w-full border-2 border-[#00bfc8] rounded-full px-4 py-2 focus:outline-none [font-family:'Inter',Helvetica] text-gray-700"
+                     className="w-full border-2 border-[#00bfc8] rounded-full px-5 py-3 focus:outline-none [font-family:'Inter',Helvetica] text-gray-700 text-sm"
                       name="category"
                       value={editForm.category}
                       onChange={(e) =>
@@ -675,13 +739,13 @@ export const SupplierModule = () => {
                     </select>
                   </div>
                   <div>
-                    <label className=" opacity-60 block [font-family:'Oxygen',Helvetica] text-gray-700 text-xl  mb-3">
+                    <label className=" opacity-60 block [font-family:'Oxygen',Helvetica] text-gray-700 text-xl  py-3">
                       Company Address
                     </label>
                     <input
-                      className="w-full border-2 border-[#00bfc8] rounded-full px-4 py-2 focus:outline-none [font-family:'Inter',Helvetica] text-gray-700"
+                     className="w-full border-2 border-[#00bfc8] rounded-full px-5 py-3 focus:outline-none [font-family:'Inter',Helvetica] text-gray-700 text-sm"
                       name="address"
-                      placeholder="Contat "
+                      placeholder="Contact "
                       value={editForm.address}
                       onChange={(e) =>
                         setEditForm((f) => ({ ...f, address: e.target.value }))
@@ -769,13 +833,81 @@ export const SupplierModule = () => {
             </div>
           </div>
         )}
-        {showSuccessModal && (
+
+        {showRemoveConfirm && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black bg-opacity-50">
             <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-sm relative flex flex-col items-center">
               {/* Close X button */}
               <button
                 className="absolute top-5 right-5 text-gray-500 hover:text-gray-700 text-2xl font-bold"
-                onClick={() => setShowSuccessModal(false)}
+                onClick={() => setShowRemoveConfirm(false)}
+                aria-label="Close"
+              >
+                ×
+              </button>
+              {/* Red Exclamation Icon */}
+              <div className="flex justify-center mb-4 mt-2">
+                <svg className="w-16 h-16" viewBox="0 0 64 64" fill="none">
+                  <circle
+                    cx="32"
+                    cy="32"
+                    r="28"
+                    stroke="#E11D48"
+                    strokeWidth="4"
+                  />
+                  <text
+                    x="32"
+                    y="46"
+                    textAnchor="middle"
+                    fontSize="40"
+                    fill="#E11D48"
+                    fontWeight="bold"
+                  >
+                    !
+                  </text>
+                </svg>
+              </div>
+              {/* Message */}
+              <h3 className="text-center text-xl font-semibold text-gray-900 mb-2 mt-2">
+                Are you sure you want to
+                <br />
+                remove {editForm?.name}?
+              </h3>
+              {/* Buttons */}
+              <div className="flex gap-4 mt-6 w-full">
+                <button
+                  className="flex-1 bg-red-600 text-white rounded-full px-6 py-2.5 font-semibold shadow hover:bg-red-700 transition text-lg"
+                  onClick={async () => {
+                    // Remove from Firestore
+                    const supplierId = suppliers[editForm.index].id;
+                    if (supplierId) {
+                      await deleteDoc(doc(db, "suppliers", supplierId));
+                    }
+                    setShowRemoveConfirm(false);
+                    setShowEditModal(false);
+                    setShowRemoveSuccess(true);
+                  }}
+                >
+                  Remove
+                </button>
+                <button
+                  className="flex-1 bg-[#00bfc8] text-white rounded-full px-6 py-2.5 font-semibold shadow hover:bg-[#00a7b0] transition text-lg"
+                  onClick={() => setShowRemoveConfirm(false)}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showRemoveSuccess && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black bg-opacity-50">
+            <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-sm relative flex flex-col items-center">
+              {/* Close X button */}
+              <button
+                className="absolute top-5 right-5 text-gray-500 hover:text-gray-700 text-2xl font-bold"
+                onClick={() => setShowRemoveSuccess(false)}
                 aria-label="Close"
               >
                 ×
@@ -802,17 +934,17 @@ export const SupplierModule = () => {
               </div>
               {/* Message */}
               <h3 className="[font-family:'Inter',Helvetica] text-center text-xl font-bold text-gray-900 mb-2 mt-2">
-                Supplier Added
+                Supplier Removed
                 <br />
                 Successfully
               </h3>
               <p className="[font-family:'Inter',Helvetica] text-center text-gray-700 mb-4">
-                Supplier Name has been successfully added.
+                Supplier has been successfully removed from your directory.
               </p>
               {/* Done Button */}
               <button
                 className="w-40 bg-[#00bfc8] text-white rounded-full px-10 py-2.5 [font-family:'Inter',Helvetica] font-semibold shadow hover:bg-[#00a7b0] transition text-lg"
-                onClick={() => setShowSuccessModal(false)}
+                onClick={() => setShowRemoveSuccess(false)}
               >
                 Done
               </button>
@@ -907,7 +1039,7 @@ export const SupplierModule = () => {
                               )}
                             </td>
                             <td className="py-4 pr-4 align-top">
-                              {s.totalOrders}
+                              {supplierTotalQuantities[s.name] || 0}
                             </td>
                             <td className="py-4 pr-4 align-top">
                               {s.lastOrder
@@ -954,7 +1086,7 @@ export const SupplierModule = () => {
               <>
                 <h2 className="[font-family:'Inter',Helvetica] font-semibold text-xl text-gray-900 mb-4 flex items-center gap-2">
                   <span>
-                    <img src={Boxx} className="inline-block w-7 h-7 mr-2" />
+                    <img src={boxx} className="inline-block w-7 h-7 mr-2" />
                   </span>
                   All Ordered Items{" "}
                   <span className="[font-family:'Oxygen',Helvetica] font-normal text-gray-500 text-lg">
