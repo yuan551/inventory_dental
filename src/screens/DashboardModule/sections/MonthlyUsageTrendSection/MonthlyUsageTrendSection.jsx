@@ -116,10 +116,27 @@ export const MonthlyUsageTrendSection = ({
               <Tooltip content={<CustomTooltip />} cursor={{ stroke: '#374151', strokeOpacity: 0.15 }} />
               <Legend verticalAlign="top" align="left" content={renderLegend} height={36} />
               {series.map((s, i) => (
-                <>
-                  <Area key={`a-${s.label}`} type="monotone" dataKey={s.label} stroke={colors[i]} strokeWidth={2.5} fill={`url(#color-${i})`} activeDot={{ r: 5 }} />
-                  <Line key={`l-${s.label}`} type="monotone" dataKey={s.label} stroke={colors[i]} strokeWidth={2.5} dot={{ r: 3, stroke: '#fff', strokeWidth: 2 }} activeDot={{ r: 6 }} />
-                </>
+                <React.Fragment key={`series-${s.label}-${i}`}>
+                  <Area
+                    type="monotone"
+                    dataKey={s.label}
+                    stroke={colors[i]}
+                    strokeWidth={2.5}
+                    fill={`url(#color-${i})`}
+                    fillOpacity={0.12}
+                    activeDot={{ r: 5 }}
+                  />
+                  <Line
+                    key={`l-${s.label}`}
+                    type="monotone"
+                    dataKey={s.label}
+                    stroke={colors[i]}
+                    strokeWidth={2.5}
+                    dot={{ r: 3, stroke: '#fff', strokeWidth: 2 }}
+                    activeDot={{ r: 6 }}
+                    strokeDasharray={i === 0 ? '' : i === 1 ? '6 4' : '2 4'}
+                  />
+                </React.Fragment>
               ))}
             </AreaChart>
           </ResponsiveContainer>

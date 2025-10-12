@@ -59,7 +59,7 @@ export const OrderedTransactions = () => {
             ) : filtered.map((r) => {
               const dt = r.created_at?.toDate ? r.created_at.toDate() : null;
               const d = dt ? dt.toLocaleDateString('en-CA') : '—';
-              const t = dt ? dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+              const t = dt ? dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }) : '';
               return (
                 <tr key={r.id} className="bg-white">
                   <td className="py-3 px-4 text-[#00B6C9]">{d}<div className="text-xs text-gray-400">{t}</div></td>

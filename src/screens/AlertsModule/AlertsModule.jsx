@@ -1,6 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { DashboardSidebarSection } from "../DashboardModule/sections/DashboardSidebarSection/DashboardSidebarSection";
 import { AppHeader } from "../../components/layout/AppHeader";
+import { collection, onSnapshot, orderBy, query } from 'firebase/firestore';
+import { db } from '../../firebase';
+import { useAlerts } from '../../hooks/useAlerts';
 import totalIcon from "../../assets/Alerts/Total Alerts.png";
 import unreadIcon from "../../assets/Alerts/Unread.png";
 import expiryIcon from "../../assets/Alerts/Expiry Alerts.png";
@@ -30,6 +33,7 @@ const palette = {
 
 export const AlertsModule = () => {
   const [alerts, setAlerts] = useState([]);
+  const [notifList, setNotifList] = useState([]);
   const [activeTab, setActiveTab] = useState("all");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try { return localStorage.getItem('sidebarCollapsed') === '1'; } catch { return false; }
@@ -43,10 +47,57 @@ export const AlertsModule = () => {
     return () => window.removeEventListener('sidebar:toggle', handler);
   }, []);
 
+  // Subscribe to Firestore 'notifications' collection (if present) and merge with stock alerts
+  const { alerts: stockAlerts } = useAlerts();
+
   useEffect(() => {
-    // Mock data
-    setAlerts([]); // <-- No alerts
+    let unsub = null;
+    try {
+      const col = collection(db, 'notifications');
+      const q = query(col, orderBy('created_at', 'desc'));
+      unsub = onSnapshot(q, (snap) => {
+        const arr = [];
+        snap.forEach((docSnap) => {
+          const data = docSnap.data() || {};
+          // ignore placeholder docs
+          if (docSnap.id === 'dummy' || isPlaceholderDoc(docSnap.id, data)) return;
+          arr.push({
+            id: docSnap.id,
+            type: data.type || 'general',
+            unread: data.unread === undefined ? true : Boolean(data.unread),
+            title: data.title || data.subject || 'Notification',
+            message: data.message || data.body || '',
+            datetime: data.created_at ? (data.created_at.toDate ? data.created_at.toDate().toISOString() : new Date(data.created_at).toISOString()) : new Date().toISOString(),
+            priority: data.priority || 'low',
+          });
+        });
+        setNotifList(arr);
+      }, (err) => {
+        console.warn('alerts: notifications listener error', err);
+      });
+    } catch (e) {
+      console.warn('alerts: failed to subscribe to notifications', e);
+    }
+    return () => { try { if (unsub) unsub(); } catch {} };
   }, []);
+
+  // Merge notifications with stock-derived alerts from useAlerts()
+  useEffect(() => {
+    // Map stockAlerts (from useAlerts) into UI alert shape
+    const stockMapped = (stockAlerts || []).map((s, idx) => ({
+      id: `stock-${s.item}-${s.category}-${idx}`,
+      type: 'stock',
+      unread: true,
+      title: `${s.item} ${s.severity}`,
+      message: s.reason,
+      datetime: new Date().toISOString(),
+      // map severity to priority: Critical -> high, Low Stock -> medium
+      priority: s.severity === 'Critical' ? 'high' : 'medium',
+    }));
+
+    // Combine notifications (server) first then stock alerts so stock shows in Stock tab
+    setAlerts([...(notifList || []), ...stockMapped]);
+  }, [notifList, stockAlerts]);
 
   const counts = useMemo(() => {
     const total = alerts.length;

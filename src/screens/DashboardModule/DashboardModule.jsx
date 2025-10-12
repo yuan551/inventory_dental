@@ -9,7 +9,7 @@ import { PendingOrdersSection } from "./sections/PendingOrdersSection/PendingOrd
 import { StockAlertsListSection } from "./sections/StockAlertsListSection/StockAlertsListSection";
 import { StockAlertsSection } from "./sections/StockAlertsSection/StockAlertsSection";
 import { AppHeader } from "../../components/layout/AppHeader";
-import { collection, getDocs, query, where, orderBy } from "firebase/firestore";
+import { collection, getDocs, query, where, orderBy, onSnapshot } from "firebase/firestore";
 import { isPlaceholderDoc } from "../../lib/placeholders";
 import { db } from "../../firebase";
 
@@ -138,6 +138,30 @@ export const DashboardModule = () => {
   // Monthly usage trend from 'stock_logs' (type='stock_out')
   const [trendSeries, setTrendSeries] = useState([]);
   const [trendMonths, setTrendMonths] = useState(["Jan","Feb","Mar","Apr","May","Jun"]);
+  // Live pending orders count (based on 'ordered' collection)
+  const [pendingOrdersCount, setPendingOrdersCount] = useState(0);
+
+  useEffect(() => {
+    try {
+      const col = collection(db, 'ordered');
+      const unsub = onSnapshot(col, (snap) => {
+        let count = 0;
+        snap.forEach((docSnap) => {
+          const data = docSnap.data() || {};
+          // ignore placeholder/dummy docs
+          if (docSnap.id === 'dummy' || isPlaceholderDoc(docSnap.id, data)) return;
+          // Consider an order pending if status is 'Ordered' or 'Pending' or status is missing
+          const st = (data.status || '').toString();
+          if (st === 'Ordered' || st === 'Pending' || st === '') count += 1;
+        });
+        setPendingOrdersCount(count);
+      });
+      return () => unsub();
+    } catch (e) {
+      // if listener setup fails, leave count as 0
+      console.warn('Failed to subscribe to ordered collection for pending count', e);
+    }
+  }, []);
 
   useEffect(() => {
     const TTL_MS = 60 * 1000;
@@ -159,23 +183,45 @@ export const DashboardModule = () => {
       const cached = tryLoad();
       if (cached) { setTrendMonths(cached.months); setTrendSeries(cached.series); return; }
 
-      // Fixed window: July -> December for the current year
-      const year = new Date().getFullYear();
+      // Dynamic window: last 12 months (oldest -> newest)
+      const now = new Date();
       const months = [];
-      // Labels explicitly July to Dec
-      const labels = ['Jul','Aug','Sep','Oct','Nov','Dec'];
-      for (let m = 6; m <= 11; m++) {
-        months.push({ y: year, m });
+      const labels = [];
+      const N = 12; // months to show
+      for (let i = N - 1; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        months.push({ y: d.getFullYear(), m: d.getMonth() });
+        labels.push(d.toLocaleString(undefined, { month: 'short' }));
       }
 
       // Fetch stock_out logs within the earliest month start to the end of latest month
-  const start = new Date(months[0].y, months[0].m, 1);
-  const end = new Date(months[5].y, months[5].m + 1, 1);
+      const start = new Date(months[0].y, months[0].m, 1);
+      const end = new Date(months[months.length - 1].y, months[months.length - 1].m + 1, 1);
       try {
         // We may not have composite indexes; get all and filter client-side to avoid index issues
         const snap = await getDocs(collection(db, 'stock_logs'));
         const logs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        const stockOut = logs.filter((l) => (l.type === 'stock_out'));
+        // primary detection: type === 'stock_out'
+        let stockOut = logs.filter((l) => (l.type === 'stock_out'));
+        // if none found, attempt to detect alternative type labels (stockout, out, stock-out, etc.)
+        const allTypeValues = Array.from(new Set(logs.map(l => (l.type || '').toString().trim().toLowerCase()).filter(Boolean)));
+        if ((!stockOut || stockOut.length === 0) && allTypeValues.length > 0) {
+          // include any doc whose type contains 'out'
+          const alt = logs.filter(l => (l.type || '').toString().toLowerCase().includes('out'));
+          if (alt && alt.length > 0) stockOut = alt;
+        }
+        // final fallback: if there are logs but none matched as 'stock_out', treat any log with a positive numeric quantity
+        // and a category as a candidate for counting so the trend can still be drawn from available data.
+        if ((!stockOut || stockOut.length === 0) && logs.length > 0) {
+          const fallback = logs.filter(l => {
+            try {
+              const q = Number(l.quantity ?? l.qty ?? 0);
+              return q > 0 && (l.category || l.type || l.kind);
+            } catch (e) { return false; }
+          });
+          if (fallback && fallback.length > 0) stockOut = fallback;
+        }
+        // diagnostics removed: keep trend computation only
         const parseTs = (t) => {
           if (!t) return null;
           if (typeof t.toDate === 'function') return t.toDate();
@@ -185,15 +231,17 @@ export const DashboardModule = () => {
         };
 
         const buckets = {
-          consumables: Array(6).fill(0),
-          medicines: Array(6).fill(0),
-          equipment: Array(6).fill(0),
+          consumables: Array(labels.length).fill(0),
+          medicines: Array(labels.length).fill(0),
+          equipment: Array(labels.length).fill(0),
         };
         const normalizeCat = (c) => {
           const v = (c || '').toString().trim().toLowerCase();
-          if (v === 'medicine' || v === 'med' || v === 'medicines') return 'medicines';
-          if (v === 'equipment' || v === 'equipments' || v === 'equip') return 'equipment';
-          if (v === 'consumable' || v === 'consumables' || v === 'consum') return 'consumables';
+          // be permissive: match substrings so variants like 'medicine (medicines)'
+          // or 'consumables/supply' still map correctly
+          if (v.includes('consum') || v.includes('supply')) return 'consumables';
+          if (v.includes('medic') || v === 'med' || v === 'medicine') return 'medicines';
+          if (v.includes('equip')) return 'equipment';
           return v; // fallback — leave as-is
         };
         stockOut.forEach((l) => {
@@ -202,11 +250,15 @@ export const DashboardModule = () => {
           const idx = (dt.getFullYear() - months[0].y) * 12 + (dt.getMonth() - months[0].m);
           if (idx < 0 || idx >= 6) return;
           const qty = Number(l.quantity || 0);
-          const cat = normalizeCat(l.category);
+          // support variants where category may be stored in category | type | kind
+          const rawCat = l.category || l.type || l.kind || '';
+          const cat = normalizeCat(rawCat);
           if (cat === 'consumables') buckets.consumables[idx] += qty;
           else if (cat === 'medicines') buckets.medicines[idx] += qty;
           else if (cat === 'equipment') buckets.equipment[idx] += qty;
         });
+
+        // debug/sample grouping removed
 
         const series = [
           { label: 'Consumables', color: '#3bc3de', data: buckets.consumables },
@@ -251,10 +303,10 @@ export const DashboardModule = () => {
         {/* Content Area */}
   <div className="flex-1 flex flex-col px-8 py-6 overflow-hidden" style={{backgroundColor: '#F5F5F5'}}>
 
-          <div className="grid grid-cols-4 gap-4 mb-6 flex-shrink-0">
+            <div className="grid grid-cols-4 gap-4 mb-6 flex-shrink-0">
             <LowStockItemsSection count={lowStockCount} />
             <StockAlertsSection count={expiringSoonCount} />
-            <PendingOrdersSection count={0} />
+            <PendingOrdersSection count={pendingOrdersCount} />
             <InventoryOverviewSection totalValue={totalValue} />
           </div>
           <div className="grid grid-cols-3 gap-6 flex-1 min-h-0">
@@ -266,7 +318,10 @@ export const DashboardModule = () => {
                   Monthly Usage Trend
                 </h2>
                 <div className="flex-1 min-h-0">
-                  <MonthlyUsageTrendSection series={trendSeries} months={trendMonths} />
+                  <div className="relative">
+                    <MonthlyUsageTrendSection series={trendSeries} months={trendMonths} />
+                    {/* debug UI removed */}
+                  </div>
                 </div>
               </CardContent>
             </Card>

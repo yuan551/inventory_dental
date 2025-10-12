@@ -10,6 +10,7 @@ import {
   serverTimestamp,
   deleteDoc,
   doc,
+  updateDoc,
 } from "firebase/firestore";
 import { ChevronDown as ChevronDownIcon } from "lucide-react";
 import Users from "../../assets/Users.png";
@@ -20,20 +21,6 @@ import boxx from "../../assets/boxx.png";
 import Frame from "../../assets/Frame.png";
 import location_on from "../../assets/location_on.png";
 
-const initialSuppliers = [
-  {
-    name: "MedSupply Co.",
-    address: "123 Medical St, Healthcare City, HC 12345",
-    contactName: "John Smith",
-    email: "orders@medsupply.com",
-    phone: "+1 (555) 123-4567",
-    category: "General Supplies",
-    rating: 4.8,
-    totalOrders: 45,
-    lastOrder: "9/20/2024",
-    status: "Active",
-  },
-];
 
 export const SupplierModule = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -47,57 +34,71 @@ export const SupplierModule = () => {
   const [orders, setOrders] = useState([]);
 
   useEffect(() => {
-    const unsubOrdered = onSnapshot(collection(db, "ordered"), (snap) => {
-      setOrders(
-        snap.docs.map((doc) => {
-          const data = doc.data();
-          return {
-            id: doc.id,
-            item: data.itemNameValue || data.item_name || data.name || "",
-            quantity: `${data.quantityValue || data.quantity || 0} ${
-              data.unitValue || data.units || data.unit || ""
-            }`,
-            supplier: data.supplierValue || data.supplier || "",
-            unitCost: `₱${Number(
-              data.unitCostValue || data.unit_cost || 0
-            ).toFixed(2)}`,
-            status: data.status || "",
-            expiration: data.expiration || data.expiration_date || "—",
-            category: data.category || "",
-            dateDelivered: data.dateDelivered || "",
-            created_at: data.created_at
-              ? data.created_at.toDate
-                ? data.created_at.toDate()
-                : new Date(data.created_at)
-              : new Date(0),
-          };
-        })
-      );
-    });
+    // Only update orders when we receive a server snapshot (ignore cached snapshots)
+    const unsubOrdered = onSnapshot(
+      collection(db, "ordered"),
+      { includeMetadataChanges: true },
+      (snap) => {
+        if (snap.metadata && snap.metadata.fromCache) return; // ignore local cache updates
+        setOrders(
+          snap.docs
+            .filter((doc) => doc.id !== 'dont delete') // hide placeholder/dummy doc from UI
+            .map((doc) => {
+              const data = doc.data();
+              return {
+                id: doc.id,
+                item: data.itemNameValue || data.item_name || data.name || "",
+                quantity: `${data.quantityValue || data.quantity || 0} ${
+                  data.unitValue || data.units || data.unit || ""
+                }`,
+                supplier: data.supplierValue || data.supplier || "",
+                unitCost: `₱${Number(
+                  data.unitCostValue || data.unit_cost || 0
+                ).toFixed(2)}`,
+                status: data.status || "",
+                expiration: data.expiration || data.expiration_date || "—",
+                category: data.category || "",
+                dateDelivered: data.dateDelivered || "",
+                created_at: data.created_at
+                  ? data.created_at.toDate
+                    ? data.created_at.toDate()
+                    : new Date(data.created_at)
+                  : new Date(0),
+              };
+            })
+        );
+      }
+    );
     return () => unsubOrdered();
   }, []);
 
   useEffect(() => {
-    const unsubSuppliers = onSnapshot(collection(db, "suppliers"), (snap) => {
-      setSuppliers(
-        snap.docs.map((doc) => {
-          const data = doc.data();
-          return {
-            id: doc.id,
-            name: data.supplier,
-            address: data.address || "",
-            contactName: data.contact_person || "",
-            email: data.email || "",
-            phone: data.contact_number || "",
-            category: data.category || "",
-            rating: data.rating || "",
-            totalOrders: data.total_orders || "",
-            lastOrder: data.last_orders || "",
-            status: data.status || "",
-          };
-        })
-      );
-    });
+    // Only update suppliers when we receive a server snapshot (ignore cached snapshots)
+    const unsubSuppliers = onSnapshot(
+      collection(db, "suppliers"),
+      { includeMetadataChanges: true },
+      (snap) => {
+        if (snap.metadata && snap.metadata.fromCache) return; // ignore local cache updates
+        setSuppliers(
+          snap.docs.map((doc) => {
+            const data = doc.data();
+            return {
+              id: doc.id,
+              name: data.supplier,
+              address: data.address || "",
+              contactName: data.contact_person || "",
+              email: data.email || "",
+              phone: data.contact_number || "",
+              category: data.category || "",
+              rating: data.rating || "",
+              totalOrders: data.total_orders || "",
+              lastOrder: data.last_orders || "",
+              status: data.status || "",
+            };
+          })
+        );
+      }
+    );
     return () => unsubSuppliers();
   }, []);
 
@@ -111,7 +112,7 @@ export const SupplierModule = () => {
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showRemoveSuccess, setShowRemoveSuccess] = useState(false);
-  const [suppliers, setSuppliers] = useState(initialSuppliers);
+  const [suppliers, setSuppliers] = useState([]);
   const [selectedSupplier, setSelectedSupplier] = useState("All Supplier");
   const [nameError, setNameError] = useState("");
   const [supplierFilterOpen, setSupplierFilterOpen] = useState(false);
@@ -638,8 +639,26 @@ export const SupplierModule = () => {
               </div>
               {/* Modal Form */}
               <form
-                onSubmit={(e) => {
+                onSubmit={async (e) => {
                   e.preventDefault();
+                  // persist changes to Firestore
+                  try {
+                    const supplierId = editForm.id;
+                    if (supplierId) {
+                      await updateDoc(doc(db, 'suppliers', supplierId), {
+                        supplier: editForm.name,
+                        contact_person: editForm.contactName,
+                        contact_number: editForm.phone,
+                        email: editForm.email,
+                        category: editForm.category,
+                        address: editForm.address,
+                        rating: editForm.rating,
+                        status: editForm.status || 'Inactive',
+                      });
+                    }
+                  } catch (err) {
+                    console.error('Failed to update supplier', err);
+                  }
                   const updatedSuppliers = [...suppliers];
                   updatedSuppliers[editForm.index] = { ...editForm };
                   delete updatedSuppliers[editForm.index].index;

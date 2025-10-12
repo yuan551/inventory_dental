@@ -35,7 +35,14 @@ import "jspdf-autotable";
 // Helper functions
 const pad2 = (n) => String(n).padStart(2, "0");
 const fmtDate = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-const fmtTime = (d) => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+const fmtTime = (d) => {
+    try {
+        // Use 12-hour clock display (e.g., 5:55 PM) and avoid leading zero on hour
+        return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+    } catch (e) {
+        return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+    }
+};
 const genReferenceFrom = (itemName) => {
   const prefix = "PO-";
   const year = new Date().getFullYear();
