@@ -266,9 +266,9 @@ export const StockLogsModule = () => {
 
     // Filter logs by status and search
     const filteredLogs = modeRows.filter((log) => {
-        const matchesStatus =
-            selectedStatus === "All Status" || log.status === selectedStatus;
-        
+        // When viewing Stock Out tab, ignore status filter and always include rows
+        const matchesStatus = tab === 'out' ? true : (selectedStatus === "All Status" || log.status === selectedStatus);
+
         const item = log.item_name || log.item || "";
         const supplier = log.supplier || "";
         const reference = log.reference || "";
@@ -688,79 +688,81 @@ export const StockLogsModule = () => {
                                 Transaction Tracker ({filteredLogs.length} items)
                             </div>
                             {tab === 'in' && (
-                                <div className="flex gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={() => setSubTab('ordered')}
-                                        className={`px-4 py-2 rounded-full text-sm font-medium transition border ${subTab === 'ordered' ? 'bg-[#00B6C9] text-white border-[#00B6C9]' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
-                                    >
-                                        Ordered
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setSubTab('stockin')}
-                                        className={`px-4 py-2 rounded-full text-sm font-medium transition border ${subTab === 'stockin' ? 'bg-[#00B6C9] text-white border-[#00B6C9]' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
-                                    >
-                                        Stock In
-                                    </button>
-                                </div>
-                            )}
-                        </div>
-                        <div className="flex gap-2 md:gap-3">
-                            {/* All Status Dropdown */}
-                            <div className="relative status-dropdown">
-                                <button
-                                    className="bg-[#00B6C9] text-white px-4 md:px-6 py-2 rounded-full font-semibold flex items-center gap-2 shadow text-base font-sans focus:outline-none"
-                                    onClick={() => setShowStatusDropdown((v) => !v)}
-                                    type="button"
-                                >
-                                    <img src={allstatusIcon} alt="All Status" className="w-5 h-5" />
-                                    {selectedStatus}
-                                    <svg width="14" height="14" fill="none">
-                                        <path
-                                            d="M5 6l2 2 2-2"
-                                            stroke="#fff"
-                                            strokeWidth="1.5"
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                        />
-                                    </svg>
-                                </button>
-                                {showStatusDropdown && (
-                                    <div
-                                        className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-lg border border-gray-100 z-30 py-2 dropdown-anim-in origin-top-right"
-                                        style={{
-                                            maxHeight: 'unset',
-                                            overflow: 'visible',
-                                            animationDuration: '140ms'
-                                        }}
-                                    >
-                                        {statusOptions.map((status) => (
-                                            <button
-                                                key={status}
-                                                className={`w-full text-left px-4 py-2 text-sm font-sans hover:bg-[#E9F7FA] transition-colors ${
-                                                    selectedStatus === status
-                                                        ? 'bg-[#E9F7FA] text-[#00B6C9] font-semibold'
-                                                        : 'text-gray-700'
-                                                } flex items-center gap-2`}
-                                                onClick={() => {
-                                                    setSelectedStatus(status);
-                                                    setShowStatusDropdown(false);
-                                                }}
-                                                type="button"
-                                            >
-                                                {selectedStatus === status && (
-                                                    <svg width="16" height="16" fill="none" className="mr-1">
-                                                        <circle cx="8" cy="8" r="7" stroke="#00B6C9" strokeWidth="2" />
-                                                        <path d="M5.2 8l2 2 3.6-3.6" stroke="#00B6C9" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                                                    </svg>
-                                                )}
-                                                {status}
-                                            </button>
-                                        ))}
+                                    <div className="flex gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => setSubTab('ordered')}
+                                            className={`px-4 py-2 rounded-full text-sm font-medium transition border ${subTab === 'ordered' ? 'bg-[#00B6C9] text-white border-[#00B6C9]' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
+                                        >
+                                            Ordered
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setSubTab('stockin')}
+                                            className={`px-4 py-2 rounded-full text-sm font-medium transition border ${subTab === 'stockin' ? 'bg-[#00B6C9] text-white border-[#00B6C9]' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
+                                        >
+                                            Stock In
+                                        </button>
                                     </div>
                                 )}
-                            </div>
+                        </div>
+                        <div className="flex gap-2 md:gap-3">
+                            {/* Hide status dropdown when viewing Stock Out */}
+                            {tab !== 'out' && (
+                                <div className="relative status-dropdown">
+                                    <button
+                                        className="bg-[#00B6C9] text-white px-4 md:px-6 py-2 rounded-full font-semibold flex items-center gap-2 shadow text-base font-sans focus:outline-none"
+                                        onClick={() => setShowStatusDropdown((v) => !v)}
+                                        type="button"
+                                    >
+                                        <img src={allstatusIcon} alt="All Status" className="w-5 h-5" />
+                                        {selectedStatus}
+                                        <svg width="14" height="14" fill="none">
+                                            <path
+                                                d="M5 6l2 2 2-2"
+                                                stroke="#fff"
+                                                strokeWidth="1.5"
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                            />
+                                        </svg>
+                                    </button>
+                                    {showStatusDropdown && (
+                                        <div
+                                            className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-lg border border-gray-100 z-30 py-2 dropdown-anim-in origin-top-right"
+                                            style={{
+                                                maxHeight: 'unset',
+                                                overflow: 'visible',
+                                                animationDuration: '140ms'
+                                            }}
+                                        >
+                                            {statusOptions.map((status) => (
+                                                <button
+                                                    key={status}
+                                                    className={`w-full text-left px-4 py-2 text-sm font-sans hover:bg-[#E9F7FA] transition-colors ${
+                                                        selectedStatus === status
+                                                            ? 'bg-[#E9F7FA] text-[#00B6C9] font-semibold'
+                                                            : 'text-gray-700'
+                                                    } flex items-center gap-2`}
+                                                    onClick={() => {
+                                                        setSelectedStatus(status);
+                                                        setShowStatusDropdown(false);
+                                                    }}
+                                                    type="button"
+                                                >
+                                                    {selectedStatus === status && (
+                                                        <svg width="16" height="16" fill="none" className="mr-1">
+                                                            <circle cx="8" cy="8" r="7" stroke="#00B6C9" strokeWidth="2" />
+                                                            <path d="M5.2 8l2 2 3.6-3.6" stroke="#00B6C9" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                                        </svg>
+                                                    )}
+                                                    {status}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                             <button
                                 className="bg-[#00B6C9] text-white px-4 md:px-6 py-2 rounded-full font-semibold flex items-center gap-2 shadow text-base font-sans"
                                 onClick={handleExportPDF}
@@ -832,7 +834,21 @@ export const StockLogsModule = () => {
                                             <td className="py-2 px-2 md:py-3 md:px-4 align-top">{log.reference || "N/A"}</td>
                                             {tab === 'out' && (
                                                 <td className="py-2 px-2 md:py-3 md:px-4 align-top">
-                                                    <div className="text-gray-600 text-sm max-w-xs break-words whitespace-pre-wrap">{log.notes || '—'}</div>
+                                                    {/* Clamp long notes visually to avoid stretching rows. Keep original text in title for hover tooltip. */}
+                                                    <div
+                                                        className="text-gray-600 text-sm max-w-xs break-words whitespace-pre-wrap"
+                                                        style={{
+                                                            display: '-webkit-box',
+                                                            WebkitLineClamp: 3,
+                                                            WebkitBoxOrient: 'vertical',
+                                                            overflow: 'hidden',
+                                                            textOverflow: 'ellipsis',
+                                                            whiteSpace: 'normal'
+                                                        }}
+                                                        title={(log.notes || '—').toString()}
+                                                    >
+                                                        {log.notes || '—'}
+                                                    </div>
                                                 </td>
                                             )}
                                             {tab === 'in' && subTab !== 'stockin' && (

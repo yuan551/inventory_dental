@@ -256,30 +256,83 @@ export const InventoryModule = () => {
   
   // Quick Actions: toggles and inline edit helpers
   const handleToggleEdit = async () => {
-    if (editMode && Object.keys(editedRows).length) {
-      try {
-        const batch = writeBatch(db);
-        Object.entries(editedRows).forEach(([id, payload]) => batch.update(doc(db, activeTab, id), payload));
-        await batch.commit();
-        setDataMap((prev) => {
-          const list = [...(prev[activeTab] || [])].map((r) => {
-            if (!editedRows[r._id]) return r;
-            const p = editedRows[r._id];
-            const next = { ...r };
-            if (p.item_name !== undefined) next.item = p.item_name;
-            if (p.expiration !== undefined) next.expiration = p.expiration || '—';
-            if (p.unit_cost !== undefined) next.unitCost = `₱${Number(p.unit_cost || 0).toFixed(2)}`;
-            return next;
-          });
-          try { sessionStorage.setItem(getCacheKey(activeTab), JSON.stringify({ at: Date.now(), rows: list })); } catch {}
-          return { ...prev, [activeTab]: list };
-        });
-        setEditedRows({});
-      } catch (e) {
-        console.error('Failed to save edits', e);
-      }
+    // If enabling edit mode, clear prior validation errors
+    if (!editMode) {
+      setEditValidationErrors([]);
+      setEditMode(true);
+      return;
     }
-    setEditMode((v) => !v);
+
+    // Attempting to finish editing: validate pending edits
+    if (editMode && Object.keys(editedRows).length) {
+      const errors = [];
+
+      const parseUnitCost = (v) => {
+        try {
+          if (v === undefined || v === null) return null;
+          if (typeof v === 'number') return v;
+          const s = String(v).replace(/[^0-9.\-]/g, '');
+          if (s.trim() === '') return null;
+          const n = Number(s);
+          return Number.isNaN(n) ? null : n;
+        } catch (e) { return null; }
+      };
+
+      Object.entries(editedRows).forEach(([id, payload]) => {
+        if (payload.item_name !== undefined) {
+          if (!String(payload.item_name || '').trim()) errors.push({ id, message: 'Item name cannot be empty' });
+        }
+        if (payload.unit_cost !== undefined) {
+          const num = parseUnitCost(payload.unit_cost);
+          if (num === null) errors.push({ id, message: 'Unit cost must be a valid number' });
+        }
+      });
+
+      if (errors.length) {
+        setEditValidationErrors(errors);
+        setIsValidationModalOpen(true);
+        // keep edit mode enabled so user can fix inline values
+        return;
+      }
+
+      // No validation errors — ask for confirmation before saving
+      setIsConfirmSaveOpen(true);
+      return;
+    }
+
+    setEditMode(false);
+  };
+
+  // commit edits after confirmation
+  const confirmSaveEdits = async () => {
+    setIsConfirmSaveOpen(false);
+    if (!Object.keys(editedRows).length) {
+      setEditMode(false);
+      return;
+    }
+    try {
+      const batch = writeBatch(db);
+      Object.entries(editedRows).forEach(([id, payload]) => batch.update(doc(db, activeTab, id), payload));
+      await batch.commit();
+      setDataMap((prev) => {
+        const list = [...(prev[activeTab] || [])].map((r) => {
+          if (!editedRows[r._id]) return r;
+          const p = editedRows[r._id];
+          const next = { ...r };
+          if (p.item_name !== undefined) next.item = p.item_name;
+          if (p.expiration !== undefined) next.expiration = p.expiration || '—';
+          if (p.unit_cost !== undefined) next.unitCost = `₱${Number(p.unit_cost || 0).toFixed(2)}`;
+          return next;
+        });
+        try { sessionStorage.setItem(getCacheKey(activeTab), JSON.stringify({ at: Date.now(), rows: list })); } catch {}
+        return { ...prev, [activeTab]: list };
+      });
+      setEditedRows({});
+      setEditValidationErrors([]);
+      setEditMode(false);
+    } catch (e) {
+      console.error('Failed to save edits', e);
+    }
   };
   const handleToggleSelect = () => {
     setSelectMode((v) => {
@@ -287,6 +340,16 @@ export const InventoryModule = () => {
       if (!next) setSelectedRows(new Set());
       return next;
     });
+  };
+  // Select all rows across the entire inventory (all categories) and enable select mode
+  const handleSelectAll = () => {
+    try {
+      const ids = Object.keys(dataMap || {}).flatMap((cat) => (dataMap[cat] || []).filter(r => r && r._id !== 'dummy').map(r => r._id));
+      setSelectedRows(new Set(ids.filter(Boolean)));
+      setSelectMode(true);
+      // keep Quick Actions closed for consistent UX
+      setQaOpen(false);
+    } catch (e) { console.error('Select all failed', e); }
   };
   // Toggle selection using the stable document id
   const toggleRowSelected = (id) => {
@@ -323,6 +386,28 @@ export const InventoryModule = () => {
       copy[activeTab] = list;
       return copy;
     });
+  };
+
+  // Normalize expiration input to MM/DD/YYYY-ish format: accept digits only, auto-insert slashes
+  const handleExpirationInput = (index, raw) => {
+    try {
+      const s = String(raw || '');
+      // strip non-digits, limit to 8 digits (MMDDYYYY)
+      const digits = s.replace(/[^0-9]/g, '').slice(0, 8);
+      const mm = digits.slice(0, 2);
+      const dd = digits.slice(2, 4);
+      const yyyy = digits.slice(4); // remaining 0-4 digits
+      const parts = [];
+      if (mm) parts.push(mm);
+      if (dd) parts.push(dd);
+      if (yyyy) parts.push(yyyy);
+      const formatted = parts.join('/');
+      // Pass the formatted value to the existing inline change handler
+      handleInlineChange(index, 'expiration', formatted);
+    } catch (e) {
+      console.error('Failed to parse expiration input', e);
+      handleInlineChange(index, 'expiration', raw);
+    }
   };
 
   // Notes helpers
@@ -627,6 +712,9 @@ export const InventoryModule = () => {
   }, []);
 
   const [isSaving, setIsSaving] = useState(false);
+  const [editValidationErrors, setEditValidationErrors] = useState([]); // [{id, message}]
+  const [isConfirmSaveOpen, setIsConfirmSaveOpen] = useState(false);
+  const [isValidationModalOpen, setIsValidationModalOpen] = useState(false);
 
   // New Order validation: require item name, positive quantity, unit cost, supplier and unit
   const isNewOrderValid = (() => {
@@ -1035,6 +1123,55 @@ export const InventoryModule = () => {
       <div className={`flex-shrink-0 transition-[width] duration-200 ${sidebarCollapsed ? 'w-20' : 'w-64'}`}>
         <DashboardSidebarSection currentPage="INVENTORY" />
       </div>
+      {/* Validation Modal: informs user required fields are missing */}
+      <div className={`${isValidationModalOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'} fixed inset-0 z-[82] flex items-center justify-center transition-opacity duration-200`}
+           onClick={() => { if (!isValidationModalOpen) return; setIsValidationModalOpen(false); }}>
+        <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" />
+        <div className={`relative z-10 w-[520px] max-w-[92vw] bg-white rounded-2xl border border-gray-200 shadow-[0_20px_50px_rgba(0,0,0,0.25)] transition-all duration-200 transform ${isValidationModalOpen ? 'scale-100 translate-y-0' : 'scale-95 translate-y-2'}`} onClick={(e) => e.stopPropagation()}>
+          <button className="absolute right-3 top-3 p-1 rounded-full hover:bg-gray-100" onClick={() => setIsValidationModalOpen(false)} aria-label="Close">
+            <XIcon className="w-5 h-5 text-gray-500" />
+          </button>
+          <div className="px-6 pt-6 pb-5 text-center">
+            <div className="w-12 h-12 mx-auto rounded-full bg-red-500/10 flex items-center justify-center shadow-sm">
+              <svg className="w-6 h-6 text-red-600" viewBox="0 0 20 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.487 0l5.454 9.692A1.75 1.75 0 0116.454 15H3.546a1.75 1.75 0 01-1.744-2.209L8.257 3.1zM11 13a1 1 0 10-2 0 1 1 0 002 0zm-1-9a.75.75 0 00-.75.75v5.5c0 .414.336.75.75.75s.75-.336.75-.75v-5.5A.75.75 0 0010 4z" clipRule="evenodd" /></svg>
+            </div>
+            <h3 className="mt-4 [font-family:'Inter',Helvetica] font-semibold text-gray-900 text-lg">Missing required fields</h3>
+            <p className="mt-2 [font-family:'Oxygen',Helvetica] text-gray-500 text-sm">Please fill required fields before saving. Required: Item name and Unit cost.</p>
+            <div className="mt-4 text-left max-h-40 overflow-auto px-4">
+              <ul className="list-disc list-inside text-sm text-red-700">
+                {editValidationErrors.map((err, i) => (
+                  <li key={i}>{err.message}</li>
+                ))}
+              </ul>
+            </div>
+            <div className="mt-5 flex items-center justify-center gap-3">
+              <Button onClick={() => setIsValidationModalOpen(false)} className="px-5 py-2 rounded-full bg-[#00b7c2] hover:bg-[#009ba5] text-white">OK</Button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Confirm Save Modal */}
+      <div className={`${isConfirmSaveOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'} fixed inset-0 z-[83] flex items-center justify-center transition-opacity duration-200`}
+           onClick={() => { if (!isConfirmSaveOpen) return; setIsConfirmSaveOpen(false); }}>
+        <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" />
+        <div className={`relative z-10 w-[440px] max-w-[92vw] bg-white rounded-2xl border border-gray-200 shadow-[0_20px_50px_rgba(0,0,0,0.25)] transition-all duration-200 transform ${isConfirmSaveOpen ? 'scale-100 translate-y-0' : 'scale-95 translate-y-2'}`} onClick={(e) => e.stopPropagation()}>
+          <button className="absolute right-3 top-3 p-1 rounded-full hover:bg-gray-100" onClick={() => setIsConfirmSaveOpen(false)} aria-label="Close">
+            <XIcon className="w-5 h-5 text-gray-500" />
+          </button>
+          <div className="px-6 pt-6 pb-5 text-center">
+            <div className="w-12 h-12 mx-auto rounded-full bg-yellow-100 flex items-center justify-center shadow-sm">
+              <svg className="w-6 h-6 text-yellow-600" viewBox="0 0 20 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M10 18a8 8 0 100-16 8 8 0 000 16zM9 7h2v5H9V7zm0 6h2v2H9v-2z"/></svg>
+            </div>
+            <h3 className="mt-4 [font-family:'Inter',Helvetica] font-semibold text-gray-900 text-lg">Save changes?</h3>
+            <p className="mt-1 [font-family:'Oxygen',Helvetica] text-gray-500 text-sm">Are you sure you want to save your inline edits? This will update the inventory records.</p>
+            <div className="mt-5 flex items-center justify-center gap-3">
+              <Button onClick={() => setIsConfirmSaveOpen(false)} className="px-5 py-2 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700">Cancel</Button>
+              <Button onClick={confirmSaveEdits} className="px-5 py-2 rounded-full bg-[#00b7c2] hover:bg-[#009ba5] text-white">Yes, save</Button>
+            </div>
+          </div>
+        </div>
+      </div>
       
       {/* Stock Out Summary Modal */}
       <div className={`${isStockOutSummaryOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'} fixed inset-0 z-[60] flex items-center justify-center transition-opacity duration-200`}
@@ -1193,12 +1330,25 @@ export const InventoryModule = () => {
               </h2>
               {selectMode && (
                 <div>
-                  <Button onClick={handleToggleSelect} className="px-4 py-2 rounded-full bg-[#00b7c2] hover:bg-[#009ba5] text-white [font-family:'Oxygen',Helvetica] font-semibold text-sm">Unselect</Button>
+                  <div className="flex items-center gap-2">
+                    <Button onClick={handleToggleSelect} className="px-4 py-2 rounded-full bg-[#00b7c2] hover:bg-[#009ba5] text-white [font-family:'Oxygen',Helvetica] font-semibold text-sm">Unselect</Button>
+                    <Button onClick={handleSelectAll} className="px-4 py-2 rounded-full bg-[#00b7c2] hover:bg-[#009ba5] text-white [font-family:'Oxygen',Helvetica] font-semibold text-sm">Select All</Button>
+                  </div>
                 </div>
               )}
             </div>
 
             {/* Inventory Table */}
+            {editValidationErrors && editValidationErrors.length > 0 && (
+              <div className="mb-4 rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-800">
+                <div className="font-medium">Fix the following before saving:</div>
+                <ul className="mt-1 list-disc list-inside">
+                  {editValidationErrors.slice(0,5).map((err, idx) => (
+                    <li key={idx}>{err.message}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
             <div className="overflow-hidden rounded-xl border border-gray-200 shadow-sm flex-1 overflow-y-auto min-h-[180px]">
               <table className="w-full">
                 <thead className="bg-gray-50">
@@ -1245,7 +1395,10 @@ export const InventoryModule = () => {
                           <Input
                             className="h-9 rounded-full w-40"
                             value={item.expiration}
-                            onChange={(e) => handleInlineChange(item._sourceIndex, 'expiration', e.target.value)}
+                            onChange={(e) => handleExpirationInput(item._sourceIndex, e.target.value)}
+                            inputMode="numeric"
+                            placeholder="MM/DD/YYYY"
+                            maxLength={10} /* allow up to 'MM/DD/YYYY' (including slashes) */
                           />
                         ) : (
                           item.expiration

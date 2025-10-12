@@ -1,7 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { Search as SearchIcon } from "lucide-react";
 import { DashboardSidebarSection } from "../DashboardModule/sections/DashboardSidebarSection/DashboardSidebarSection";
 import { AppHeader } from "../../components/layout/AppHeader";
+import { db } from "../../firebase";
+import { collection, addDoc, onSnapshot, query, orderBy, updateDoc, doc, serverTimestamp } from "firebase/firestore";
 
 // icons (swapped from emoji to project's asset icons)
 import TotalWasteIcon from '../../assets/Waste and Disposal/Total Waste Items.png';
@@ -71,7 +74,40 @@ export const WasteModule = () => {
     } catch { return sampleItems; }
   });
 
+  // Persist locally to storage for offline UX
   useEffect(() => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); } catch {} }, [items]);
+
+  // Firestore integration: subscribe to `waste_items` collection and keep local state in sync.
+  useEffect(() => {
+    try {
+      const col = collection(db, 'waste_items');
+      const q = query(col, orderBy('created_at', 'desc'));
+      const unsub = onSnapshot(q, (snap) => {
+        const arr = [];
+        snap.forEach((s) => {
+          const d = s.data();
+          if (s.id === 'dummy' || d?.placeholder) return;
+          arr.push({ id: s.id, ...d });
+        });
+        if (arr.length > 0) {
+          setItems(arr.map(it => ({
+            id: it.id,
+            name: it.name || it.item || '',
+            quantity: String(it.quantity || ''),
+            reason: it.reason || 'Damaged',
+            disposalDate: it.disposalDate || '',
+            valueLost: Number(it.valueLost) || 0,
+            status: it.status || 'Pending Disposal',
+            notes: it.notes || []
+          })));
+        }
+      });
+      return () => unsub();
+    } catch (e) {
+      // Firestore not configured or permission denied — keep using local state
+      return () => {};
+    }
+  }, []);
 
   const [form, setForm] = useState({ name: '', quantity: '', reason: '', disposalDate: '', valueLost: '', notes: '' });
   const [error, setError] = useState('');
@@ -160,13 +196,66 @@ export const WasteModule = () => {
     }
 
   // default reason to 'Damaged' if user doesn't pick one (we only support three reasons)
-  const newItem = { id: `wst-${Date.now()}`, name: form.name, quantity: String(qty), reason: form.reason || 'Damaged', disposalDate: form.disposalDate || '', valueLost: Number(form.valueLost) || 0, status: 'Pending Disposal', notes: form.notes ? [{ text: form.notes, created_at: new Date().toISOString() }] : '' };
-    setItems(prev => [newItem, ...prev]);
-    setForm({ name: '', quantity: '', reason: '', disposalDate: '', valueLost: '', notes: '' });
-    setError('');
+  const newItemPayload = {
+    name: form.name,
+    quantity: String(qty),
+    reason: form.reason || 'Damaged',
+    disposalDate: form.disposalDate || '',
+    valueLost: Number(form.valueLost) || 0,
+    status: 'Pending Disposal',
+    notes: form.notes ? [{ text: form.notes, created_at: new Date().toISOString() }] : [],
+    created_at: serverTimestamp()
+  };
+
+  // Optimistic local update for snappy UI
+  const localId = `wst-${Date.now()}`;
+  const newItem = { id: localId, ...newItemPayload, notes: newItemPayload.notes };
+  setItems(prev => [newItem, ...prev]);
+  setForm({ name: '', quantity: '', reason: '', disposalDate: '', valueLost: '', notes: '' });
+  setError('');
+
+  // Try to persist to Firestore; if it fails, we keep the local state so the UI still works offline
+  (async () => {
+    try {
+      const col = collection(db, 'waste_items');
+      const ref = await addDoc(col, newItemPayload);
+      // Replace the optimistic local id with the server id when available
+      setItems(prev => prev.map(it => it.id === localId ? { ...it, id: ref.id } : it));
+    } catch (err) {
+      console.warn('Failed to save waste item to Firestore:', err);
+    }
+  })();
   };
 
   const updateStatus = (id, status) => setItems(prev => prev.map(it => it.id === id ? { ...it, status } : it));
+
+  // Dropdown portal position for status menu
+  const [dropdownStyle, setDropdownStyle] = useState(null);
+
+  const handleToggleStatus = (e, it) => {
+    try {
+      // If already open for this id, close it
+      if (openStatusMenu === it.id) {
+        setOpenStatusMenu(null);
+        setDropdownStyle(null);
+        return;
+      }
+
+      const el = e.currentTarget || e.target;
+      const rect = el.getBoundingClientRect();
+      const dropdownWidth = 160; // px
+      const gap = 6;
+      let left = Math.round(rect.right - dropdownWidth);
+      if (left < 8) left = Math.round(rect.left);
+      const top = Math.round(rect.bottom + gap);
+      setDropdownStyle({ top: `${top}px`, left: `${left}px`, minWidth: `${dropdownWidth}px` });
+      setOpenStatusMenu(it.id);
+    } catch (err) {
+      // fallback: just toggle
+      setOpenStatusMenu(openStatusMenu === it.id ? null : it.id);
+      setDropdownStyle(null);
+    }
+  };
 
   const filtered = items.filter(it => {
     if (filter !== 'All items' && it.status !== filter) return false;
@@ -307,6 +396,15 @@ export const WasteModule = () => {
                 .waste-scroll-container::-webkit-scrollbar-track { background: transparent; }
                 .waste-scroll-container::-webkit-scrollbar-thumb { background: #00B7C2; border-radius: 6px; }
                 .waste-scroll-container { scrollbar-width: thin; scrollbar-color: #00B7C2 transparent; }
+                /* Smooth interactions */
+                .waste-scroll-container { scroll-behavior: smooth; }
+                /* Dropdown animation helpers used across the page */
+                .animate-dropdown, .dropdown-anim-in { animation: dropdown-anim 160ms cubic-bezier(.2,.9,.2,1); }
+                .dropdown-anim-out { animation: dropdown-out 120ms ease forwards; }
+                @keyframes dropdown-anim { from { opacity: 0; transform: translateY(-6px) scale(.995); } to { opacity: 1; transform: translateY(0) scale(1); } }
+                @keyframes dropdown-out { from { opacity: 1; transform: translateY(0) scale(1); } to { opacity: 0; transform: translateY(-6px) scale(.995); } }
+                /* Small default transition for interactive elements on this page */
+                .inline-flex, button, select { transition: all 140ms cubic-bezier(.2,.9,.2,1); }
               `}</style>
 
               <div className="waste-scroll-container overflow-x-auto">
@@ -333,17 +431,10 @@ export const WasteModule = () => {
                         <td className="py-3 text-sm text-red-600 align-top">{(Number(it.valueLost) || 0).toLocaleString('en-PH', { style: 'currency', currency: 'PHP' })}</td>
                         <td className="py-3 text-sm align-top">
                           <div className="relative inline-block">
-                            <button onClick={() => setOpenStatusMenu(openStatusMenu === it.id ? null : it.id)} className="inline-flex items-center gap-2">
+                            <button onClick={(e) => handleToggleStatus(e, it)} className="inline-flex items-center gap-2 transition-all duration-150">
                               <StatusBadge status={it.status} />
                               <svg className="w-3 h-3 text-gray-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z" clipRule="evenodd"/></svg>
                             </button>
-                            {openStatusMenu === it.id && (
-                              <div className="absolute right-0 mt-2 w-40 bg-white border rounded shadow z-20">
-                                <button onClick={() => { updateStatus(it.id, 'Disposed'); setOpenStatusMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-gray-50">Disposed</button>
-                                <button onClick={() => { updateStatus(it.id, 'Pending Disposal'); setOpenStatusMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-gray-50">Pending Disposal</button>
-                                {/* Rejected option removed as requested */}
-                              </div>
-                            )}
                           </div>
                         </td>
                         <td className="py-3 text-sm align-top">
@@ -386,7 +477,29 @@ export const WasteModule = () => {
                   </table>
                 </div>
               </div>
-            </div>
+                {/* Portal dropdown for status menu to avoid clipping by scroll containers */}
+                {openStatusMenu && typeof document !== 'undefined' && createPortal(
+                  <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }} onMouseDown={() => { setOpenStatusMenu(null); }}>
+                    <div style={{ position: 'fixed', top: dropdownStyle?.top || 0, left: dropdownStyle?.left || 0, minWidth: dropdownStyle?.minWidth || 160 }} onMouseDown={(e) => e.stopPropagation()}>
+                      <div className="bg-white border rounded shadow z-50 animate-dropdown" style={{ overflow: 'hidden' }}>
+                        <button onClick={async () => {
+                          const id = openStatusMenu;
+                          updateStatus(id, 'Disposed');
+                          setOpenStatusMenu(null);
+                          try { if (id && !id.startsWith('wst-')) await updateDoc(doc(db, 'waste_items', id), { status: 'Disposed' }); } catch (e) { console.warn('Failed to persist status', e); }
+                        }} className="w-full text-left px-3 py-2 hover:bg-gray-50">Disposed</button>
+                        <button onClick={async () => {
+                          const id = openStatusMenu;
+                          updateStatus(id, 'Pending Disposal');
+                          setOpenStatusMenu(null);
+                          try { if (id && !id.startsWith('wst-')) await updateDoc(doc(db, 'waste_items', id), { status: 'Pending Disposal' }); } catch (e) { console.warn('Failed to persist status', e); }
+                        }} className="w-full text-left px-3 py-2 hover:bg-gray-50">Pending Disposal</button>
+                      </div>
+                    </div>
+                  </div>,
+                  document.body
+                )}
+                </div>
             </div>
             {/* legend placed outside the table card to match design (right-aligned) */}
             {/* Notes modal */}
@@ -417,6 +530,18 @@ export const WasteModule = () => {
                         // reflect in modal list immediately
                         setNotesList(prev => [note, ...prev]);
                         setNewNoteText('');
+
+                        // Persist to Firestore if this item has a server id (not the optimistic local id)
+                        try {
+                          if (notesItemId && !notesItemId.startsWith('wst-')) {
+                            const item = items.find(x => x.id === notesItemId) || {};
+                            const existing = Array.isArray(item.notes) ? item.notes : (typeof item.notes === 'string' && item.notes ? [{ text: item.notes, created_at: new Date().toISOString() }] : []);
+                            const newNotes = [note, ...existing];
+                            await updateDoc(doc(db, 'waste_items', notesItemId), { notes: newNotes });
+                          }
+                        } catch (err) {
+                          console.warn('Failed to persist note to Firestore', err);
+                        }
                       }} className="px-4 py-2 rounded-full bg-[#00B7C2] text-white">Add</button>
                     </div>
 
