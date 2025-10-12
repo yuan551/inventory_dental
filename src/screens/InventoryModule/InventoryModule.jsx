@@ -101,6 +101,10 @@ export const InventoryModule = () => {
   const [isDeleteNoteOpen, setIsDeleteNoteOpen] = useState(false);
   const [noteToDelete, setNoteToDelete] = useState(null);
   const [isDeletingNote, setIsDeletingNote] = useState(false);
+  // Delete inventory item modal state
+  const [isDeleteItemOpen, setIsDeleteItemOpen] = useState(false);
+  const [itemToDelete, setItemToDelete] = useState(null); // { id, index, category }
+  const [isDeletingItem, setIsDeletingItem] = useState(false);
 
   // Numeric input sanitizers
   const handleQuantityChange = (e) => {
@@ -482,6 +486,74 @@ export const InventoryModule = () => {
       console.error('Failed to delete note', e);
     } finally {
       setIsDeletingNote(false);
+    }
+  };
+
+  // Inventory item delete helpers
+  const askDeleteItem = (row) => {
+    if (!row) return;
+    // row is the display row object from displayRows iteration
+    setItemToDelete({ id: row._id, index: row._sourceIndex, category: activeTab });
+    setIsDeleteItemOpen(true);
+  };
+
+  const deleteItemNow = async () => {
+    if (!itemToDelete || !itemToDelete.id) return;
+    try {
+      setIsDeletingItem(true);
+      // Attempt to delete from Firestore using normalized collection names and common variants
+      const norm = normalizeCategory(itemToDelete.category);
+      const variants = new Set([itemToDelete.category, norm]);
+      if (norm === 'medicines') variants.add('medicine');
+      if (norm === 'equipment') variants.add('equipments');
+
+      let deletedOnServer = false;
+      for (const colName of variants) {
+        try {
+          const maybeRef = doc(db, colName, itemToDelete.id);
+          const snap = await getDoc(maybeRef);
+          if (snap.exists()) {
+            await deleteDoc(maybeRef);
+            deletedOnServer = true;
+            break;
+          }
+        } catch (e) {
+          // If a network/permission error occurs, abort and keep modal open
+          console.error('Error deleting from firestore collection', colName, e);
+          setIsDeletingItem(false);
+          return;
+        }
+      }
+
+      if (!deletedOnServer) {
+        // Document wasn't found in any expected collection. Warn but allow local removal to keep UI consistent.
+        console.warn('Inventory document not found in expected collections; removing locally only', Array.from(variants));
+      }
+
+      // Update in-memory and cache after remote deletion attempt succeeded or doc not found
+      setDataMap((prev) => {
+        const copy = { ...prev };
+        const list = [...(copy[itemToDelete.category] || [])];
+        const idx = list.findIndex((r) => r._id === itemToDelete.id);
+        if (idx >= 0) {
+          list.splice(idx, 1);
+        }
+        copy[itemToDelete.category] = list;
+        try { sessionStorage.setItem(getCacheKey(itemToDelete.category), JSON.stringify({ at: Date.now(), rows: list })); } catch {}
+        return copy;
+      });
+      // Remove from selections if present
+      setSelectedRows((prev) => {
+        const next = new Set(prev);
+        next.delete(itemToDelete.id);
+        return next;
+      });
+      setIsDeleteItemOpen(false);
+      setItemToDelete(null);
+    } catch (e) {
+      console.error('Failed to delete item', e);
+    } finally {
+      setIsDeletingItem(false);
     }
   };
 
@@ -1223,6 +1295,17 @@ export const InventoryModule = () => {
                               </svg>
                             </button>
                           )}
+                          {editMode && (
+                            <button
+                              className="p-2 hover:bg-red-50 rounded-lg transition-colors text-red-600"
+                              title="Delete item"
+                              onClick={() => askDeleteItem(item)}
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                                <path fillRule="evenodd" d="M6 2a1 1 0 00-1 1v1H3a1 1 0 100 2h14a1 1 0 100-2h-2V3a1 1 0 00-1-1H6zm2 6a1 1 0 10-2 0v6a1 1 0 102 0V8zm6 0a1 1 0 10-2 0v6a1 1 0 102 0V8z" clipRule="evenodd" />
+                              </svg>
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -1797,6 +1880,46 @@ export const InventoryModule = () => {
                 disabled={isDeletingNote}
               >
                 {isDeletingNote ? 'Deleting…' : 'Delete'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+      {/* Delete Item Confirm Modal */}
+      <div className={`${isDeleteItemOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'} fixed inset-0 z-[85] flex items-center justify-center transition-opacity duration-200`}
+           onClick={() => { if (!isDeletingItem) { setIsDeleteItemOpen(false); setItemToDelete(null); } }}>
+        <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" />
+        <div
+          className={`relative z-10 w-[440px] max-w-[92vw] bg-white rounded-2xl border border-gray-200 shadow-[0_20px_50px_rgba(0,0,0,0.25)] transition-all duration-200 transform ${isDeleteItemOpen ? 'scale-100 translate-y-0' : 'scale-95 translate-y-2'}`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            className="absolute right-3 top-3 p-1 rounded-full hover:bg-gray-100"
+            onClick={() => { if (!isDeletingItem) { setIsDeleteItemOpen(false); setItemToDelete(null); } }}
+            aria-label="Close"
+          >
+            <XIcon className="w-5 h-5 text-gray-500" />
+          </button>
+          <div className="px-6 pt-6 pb-5 text-center">
+            <div className="w-12 h-12 mx-auto rounded-full bg-red-500/10 flex items-center justify-center shadow-sm">
+              <TrashIcon className="w-6 h-6 text-red-600" />
+            </div>
+            <h3 className="mt-4 [font-family:'Inter',Helvetica] font-semibold text-gray-900 text-lg">Delete this item?</h3>
+            <p className="mt-1 [font-family:'Oxygen',Helvetica] text-gray-500 text-sm">This will permanently remove the item from inventory. This action cannot be undone.</p>
+            <div className="mt-5 flex items-center justify-center gap-3">
+              <Button
+                onClick={() => { if (!isDeletingItem) { setIsDeleteItemOpen(false); setItemToDelete(null); } }}
+                className="px-5 py-2 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700"
+                disabled={isDeletingItem}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={async () => { await deleteItemNow(); }}
+                className={`px-5 py-2 rounded-full ${isDeletingItem ? 'bg-red-400' : 'bg-red-500 hover:bg-red-600'} text-white`}
+                disabled={isDeletingItem}
+              >
+                {isDeletingItem ? 'Deleting…' : 'Delete'}
               </Button>
             </div>
           </div>
