@@ -274,15 +274,24 @@ export const WasteModule = () => {
               </form>
             </div>
 
-              <div className="flex-1 bg-[#FEF6F6] shadow-sm border border-transparent p-6 min-h-[320px] flex flex-col gap-4" style={{borderRadius:12}}>
+              <div className="flex-1 bg-white shadow-sm border border-green-50 p-6 min-h-[320px] flex flex-col gap-4" style={{borderRadius:12}}>
               <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <h3 className="font-semibold flex items-center gap-3"><img src={LogIcon} alt="Waste & Disposal Log" className="w-5 h-5" />Waste & Disposal Log ({items.length} items)</h3>
                 <div className="flex items-center gap-1 w-full sm:w-auto justify-end">
                   <div className="relative w-full sm:w-[360px] md:w-[420px] lg:w-[520px] min-w-[260px]">
                     <SearchIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                    <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search waste items..." className="pl-10 pr-4 h-10 w-full bg-white rounded-full text-sm shadow-sm" />
+                    <input
+                      value={search}
+                      onChange={e => setSearch(e.target.value)}
+                      placeholder="Search waste items..."
+                      className="pl-10 pr-4 h-10 w-full bg-white rounded-full text-sm border border-gray-300 focus:border-[#00b7c2] focus:ring-2 focus:ring-[#00b7c2]/20 outline-none transition-colors"
+                    />
                   </div>
-                  <select value={filter} onChange={e => setFilter(e.target.value)} className="bg-white px-3 h-10 rounded-full text-sm shadow-sm w-28">
+                  <select
+                    value={filter}
+                    onChange={e => setFilter(e.target.value)}
+                    className="bg-white px-3 h-10 rounded-full text-sm w-28 border border-gray-300 focus:border-[#00b7c2] focus:ring-2 focus:ring-[#00b7c2]/20 outline-none"
+                  >
                     <option>All items</option>
                     <option>Pending Disposal</option>
                     <option>Disposed</option>
