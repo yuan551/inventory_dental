@@ -21,6 +21,10 @@ const MONTHS = [
   'January','February','March','April','May','June','July','August','September','October','November','December'
 ];
 
+// Project start date: reports must not include data before this date
+// Update this if the project start year changes
+const PROJECT_START_DATE = new Date(2025, 9, 1); // October 1, 2025
+
 function monthNameToIndex(name) {
   if (!name) return 0;
   try {
@@ -42,30 +46,30 @@ function tsToDate(ts) {
     if (!isNaN(d.getTime())) return d;
   } catch (e) {}
   return null;
-}
+  }
 
-// AnimatedSelect: simple accessible select with smooth open/close animation
-function AnimatedSelect({ options = [], value, onChange, className = "" }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
+  // AnimatedSelect: simple accessible select with smooth open/close animation
+  function AnimatedSelect({ options = [], value, onChange, className = "" }) {
+    const [open, setOpen] = useState(false);
+    const ref = useRef(null);
 
-  useEffect(() => {
-    function onDoc(e) {
-      if (!ref.current) return;
-      if (!ref.current.contains(e.target)) setOpen(false);
-    }
-    function onKey(e) {
-      if (e.key === "Escape") setOpen(false);
-    }
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("touchstart", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("touchstart", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, []);
+    useEffect(() => {
+      function onDoc(e) {
+        if (!ref.current) return;
+        if (!ref.current.contains(e.target)) setOpen(false);
+      }
+      function onKey(e) {
+        if (e.key === "Escape") setOpen(false);
+      }
+      document.addEventListener("mousedown", onDoc);
+      document.addEventListener("touchstart", onDoc);
+      document.addEventListener("keydown", onKey);
+      return () => {
+        document.removeEventListener("mousedown", onDoc);
+        document.removeEventListener("touchstart", onDoc);
+        document.removeEventListener("keydown", onKey);
+      };
+    }, []);
 
   return (
     <div ref={ref} className={`relative ${className}`}>
@@ -206,20 +210,23 @@ export const ReportsModule = () => {
           return map[m] ?? 0;
         };
 
+        // compute end-of-current-month for consistent month-bucket windows
+        const endOfCurrentMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+        const endOfCurrentMonthInclusive = new Date(endOfCurrentMonth.getTime() - 1);
+
         if (dateRange === 'Last 6 Months') {
           startDate = new Date(now.getFullYear(), now.getMonth() - 5, 1);
-          // from start of that month until now
-          endDate = now;
+          endDate = endOfCurrentMonthInclusive;
         } else if (dateRange === 'Last 12 Months') {
           startDate = new Date(now.getFullYear(), now.getMonth() - 11, 1);
-          endDate = now;
+          endDate = endOfCurrentMonthInclusive;
         } else if (dateRange === 'This Year') {
           startDate = new Date(now.getFullYear(), 0, 1);
-          endDate = now;
+          endDate = endOfCurrentMonthInclusive;
         } else {
           // default to last 6 months
           startDate = new Date(now.getFullYear(), now.getMonth() - 5, 1);
-          endDate = now;
+          endDate = endOfCurrentMonthInclusive;
         }
 
         // If custom months are provided, use them to form a month-range in the current year
@@ -228,8 +235,19 @@ export const ReportsModule = () => {
             const y = now.getFullYear();
             const sIdx = monthNameToIndex(customStart);
             const eIdx = monthNameToIndex(customEnd);
-            const s = Math.min(sIdx, eIdx);
-            const e = Math.max(sIdx, eIdx);
+            // If user selected a reversed range (start month after end month), consider it invalid
+            if (sIdx > eIdx) {
+              // set empty results: range before/invalid relative to project start -> no data
+              if (!cancelled) {
+                setTotals({ consumables: 0, medicine: 0, equipment: 0 });
+                setTotalsValue(0);
+                setTotalsByCategory({ consumables: 0, medicine: 0, equipment: 0 });
+              }
+              setLoadingTotals(false);
+              return;
+            }
+            const s = sIdx;
+            const e = eIdx;
             startDate = new Date(y, s, 1);
             // endDate: last millisecond of the end month
             endDate = new Date(y, e + 1, 1);
@@ -238,6 +256,10 @@ export const ReportsModule = () => {
             // ignore and keep previous range
           }
         }
+
+        // Ensure the requested date range does not begin before the project start date
+        if (startDate < PROJECT_START_DATE) startDate = new Date(PROJECT_START_DATE.getTime());
+        if (endDate < PROJECT_START_DATE) endDate = new Date(PROJECT_START_DATE.getTime());
 
   // Build Firestore query: timestamp between startDate and endDate (inclusive)
   const rangeKey = `${dateRange}|${customStart}|${customEnd}|${category}`;
@@ -640,21 +662,7 @@ export const ReportsModule = () => {
                     `₱${inventoryTotal.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
                   )}
                 </div>
-                <div className="text-sm text-gray-600 mt-1">
-                  {(() => {
-                    const current = inventoryTotal || 0;
-                    const prev = Number(prevInventoryTotal || 0);
-                    // both zero -> no change
-                    if (!prev && !current) return '0% from last month';
-                    // previous zero but now non-zero -> newly added
-                    if (!prev && current) return 'New since last month';
-                    // compute percent with one decimal
-                    let pct = ((current - prev) / Math.abs(prev)) * 100;
-                    if (!isFinite(pct) || Math.abs(pct) > 9999) return '>9999% from last month';
-                    const sign = pct > 0 ? '+' : '';
-                    return `${sign}${pct.toFixed(1)}% from last month`;
-                  })()}
-                </div>
+                {/* percent change placeholder removed per request */}
                 
               </div>
               <img src={BoxIcon} alt="Monthly Usage icon" className="w-12 h-12 mr-2" />
@@ -676,18 +684,7 @@ export const ReportsModule = () => {
                     return `₱${Number(money).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
                   })()
                 }</div>
-                <div className="text-sm text-gray-600 mt-1">
-                  {(() => {
-                    const current = Number(totalsValue || 0);
-                    const prev = Number(prevTotalsValue || 0);
-                    if (!prev && !current) return '0% from last month';
-                    if (!prev && current) return 'New since last month';
-                    let pct2 = ((current - prev) / Math.abs(prev)) * 100;
-                    if (!isFinite(pct2) || Math.abs(pct2) > 9999) return '>9999% from last month';
-                    const sign2 = pct2 > 0 ? '+' : '';
-                    return `${sign2}${pct2.toFixed(1)}% from last month`;
-                  })()}
-                </div>
+                {/* percent change placeholder removed per request */}
               </div>
               <img src={PesoIcon} alt="Peso" className="w-12 h-12 mr-2" />
             </div>

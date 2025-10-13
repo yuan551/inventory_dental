@@ -1,7 +1,8 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { signInWithEmailAndPassword, sendPasswordResetEmail } from "firebase/auth";
+import { signInWithEmailAndPassword, sendPasswordResetEmail, sendEmailVerification } from "firebase/auth";
 import { auth } from "../../firebase";
+import ConfirmModal from '../../components/modals/ConfirmModal';
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
@@ -19,6 +20,9 @@ export const LoginModule = () => {
   const [resetLoading, setResetLoading] = useState(false);
   const [resetMessage, setResetMessage] = useState("");
   const [resetError, setResetError] = useState("");
+  const [showVerifyModal, setShowVerifyModal] = useState(false);
+  const [verifyEmailResent, setVerifyEmailResent] = useState(false);
+  const [unverifiedEmail, setUnverifiedEmail] = useState('');
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -40,7 +44,16 @@ export const LoginModule = () => {
     }
 
     try {
-      await signInWithEmailAndPassword(auth, formData.email, formData.password);
+      const cred = await signInWithEmailAndPassword(auth, formData.email, formData.password);
+      const user = cred.user;
+      if (user && !user.emailVerified) {
+        // Prevent access and show modal instructing verification
+        console.log('User email not verified:', user.email);
+        setUnverifiedEmail(user.email || formData.email);
+        setShowVerifyModal(true);
+        setLoading(false);
+        return;
+      }
       console.log("User logged in successfully!");
       navigate("/dashboard");
     } catch (err) {
@@ -79,6 +92,24 @@ export const LoginModule = () => {
       else setResetError('Failed to send reset email. Try again later.');
     } finally {
       setResetLoading(false);
+    }
+  };
+  
+  const handleResendVerification = async () => {
+    setVerifyEmailResent(false);
+    try {
+      const user = auth.currentUser;
+      if (user && !user.emailVerified) {
+        await sendEmailVerification(user);
+        setVerifyEmailResent(true);
+      } else if (unverifiedEmail) {
+        // attempt to sign-in silently to get currentUser
+        try {
+          // No secure way to send verification without signing in; advise user to login again after verifying.
+        } catch (e) { /* ignore */ }
+      }
+    } catch (err) {
+      console.error('Failed to resend verification email', err);
     }
   };
   return (
@@ -235,6 +266,16 @@ export const LoginModule = () => {
         </div>
       </div>
     </div>
+    {/* Email verification modal for unverified accounts */}
+    <ConfirmModal
+      open={showVerifyModal}
+      title="Email not verified"
+      message={verifyEmailResent ? `A verification email was resent to ${unverifiedEmail}. Please check your inbox (and spam) and click the verification link. Then return and login.` : `Please verify your email address first. A verification link was sent to ${unverifiedEmail || formData.email} when you registered.`}
+      onCancel={() => { setShowVerifyModal(false); setVerifyEmailResent(false); }}
+      onConfirm={async () => { await handleResendVerification(); }}
+      confirmText={verifyEmailResent ? 'Ok' : 'Resend verification'}
+      cancelText='Close'
+    />
   </>
   );
 };

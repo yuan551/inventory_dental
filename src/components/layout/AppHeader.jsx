@@ -16,6 +16,7 @@ export const AppHeader = ({ title, subtitle, searchPlaceholder = "Search invento
   const { alerts } = useAlerts();
   const [open, setOpen] = useState(false);
   const [openProfile, setOpenProfile] = useState(false);
+  const [position, setPosition] = useState(null);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const navigate = useNavigate();
 
@@ -56,6 +57,25 @@ export const AppHeader = ({ title, subtitle, searchPlaceholder = "Search invento
     };
     persistColor();
   }, [profileColor]);
+
+  // Load user position/role to display under name
+  useEffect(() => {
+    let mounted = true;
+    const loadPosition = async () => {
+      try {
+        const user = auth.currentUser;
+        if (!user) return;
+        const accRef = doc(db, 'accounts', user.uid);
+        const snap = await getDoc(accRef);
+        if (snap.exists() && mounted) {
+          const acc = snap.data();
+          setPosition(acc.position || null);
+        }
+      } catch (e) { /* ignore */ }
+    };
+    loadPosition();
+    return () => { mounted = false; };
+  }, []);
 
   // Mark-as-read storage (local, per browser)
   const READ_KEY = 'read_alerts_v1';
@@ -192,10 +212,10 @@ export const AppHeader = ({ title, subtitle, searchPlaceholder = "Search invento
             </div>
             <div className="text-left">
               <div className="[font-family:'Inter',Helvetica] font-semibold text-gray-900 text-sm tracking-[0] leading-[normal]">
-                {lastName ? `Dr. ${lastName}` : 'Dr. Giselle'}
+                {lastName ? `Dr. ${lastName}` : 'User'}
               </div>
               <div className="[font-family:'Oxygen',Helvetica] font-normal text-gray-500 text-xs tracking-[0] leading-[normal]">
-                ADMINISTRATOR
+                {position ? position.toUpperCase() : 'ADMINISTRATOR'}
               </div>
             </div>
             {/* dropdown indicator */}

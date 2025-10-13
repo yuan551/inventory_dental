@@ -9,7 +9,11 @@ import { PendingOrdersSection } from "./sections/PendingOrdersSection/PendingOrd
 import { StockAlertsListSection } from "./sections/StockAlertsListSection/StockAlertsListSection";
 import { StockAlertsSection } from "./sections/StockAlertsSection/StockAlertsSection";
 import { AppHeader } from "../../components/layout/AppHeader";
+import { useLastName } from "../../hooks/useLastName";
 import { collection, getDocs, query, where, orderBy, onSnapshot } from "firebase/firestore";
+import { auth } from "../../firebase";
+import { onAuthStateChanged } from 'firebase/auth';
+import { useNavigate } from 'react-router-dom';
 import { isPlaceholderDoc } from "../../lib/placeholders";
 import { db } from "../../firebase";
 
@@ -163,6 +167,22 @@ export const DashboardModule = () => {
     }
   }, []);
 
+  const navigate = useNavigate();
+
+  // If the user is not authenticated, redirect out immediately and avoid DB reads.
+  useEffect(() => {
+    if (!auth) {
+      navigate('/');
+      return;
+    }
+    const unsubAuth = onAuthStateChanged(auth, (u) => {
+      if (!u) {
+        navigate('/');
+      }
+    });
+    return () => { try { unsubAuth(); } catch {} };
+  }, [navigate]);
+
   useEffect(() => {
     const TTL_MS = 60 * 1000;
     const CACHE_KEY = 'dashboard_usage_trend_v1';
@@ -291,6 +311,12 @@ export const DashboardModule = () => {
     };
   }, []);
 
+  const lastName = useLastName();
+
+  const subtitle = lastName
+    ? `Welcome back, Dr. ${lastName}. Here's your clinic's inventory overview.`
+    : `Welcome back. Here's your clinic's inventory overview.`;
+
   return (
     <div style={{backgroundColor: '#F5F5F5'}} className="w-full h-screen overflow-hidden flex">
       <aside className={`flex-shrink-0 transition-[width] duration-200 ${sidebarCollapsed ? 'w-20' : 'w-64'}`}>
@@ -298,7 +324,7 @@ export const DashboardModule = () => {
       </aside>
 
       <main className="flex-1 flex flex-col overflow-hidden">
-        <AppHeader title="DASHBOARD" subtitle="Welcome back, Dr. Johnson. Here's your clinic's inventory overview." />
+  <AppHeader title="DASHBOARD" subtitle={subtitle} />
 
         {/* Content Area */}
   <div className="flex-1 flex flex-col px-8 py-6 overflow-hidden" style={{backgroundColor: '#F5F5F5'}}>
