@@ -96,7 +96,7 @@ export const StockOutPage = () => {
       </div>
 
       <div className="flex-1 flex flex-col">
-        <AppHeader title="STOCK OUT" subtitle="All stock out transactions from Inventory" />
+  <AppHeader title="STOCK OUT" subtitle="All stock out transactions from Inventory" searchPlaceholder="Search stock out" />
 
         <div className="bg-white rounded-2xl shadow border border-gray-200 p-4 md:p-6 mt-6 mx-2 md:mx-8">
           <div className="font-semibold text-gray-900 text-lg md:text-xl mb-4">Transaction Tracker ({filtered.length} items)</div>

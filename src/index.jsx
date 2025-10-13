@@ -38,6 +38,32 @@ const RootLayout = () => {
 
   const isLoading = Boolean(navLoading || isNavigating);
 
+  // One-time sessionStorage cleanup: remove any cached entries that contain
+  // sentinel placeholder documents (ids 'dont' or 'dummy'). This prevents
+  // stale placeholder data from showing after you cleared Firestore.
+  React.useEffect(() => {
+    try {
+      // Safer cleanup: only target known cache key patterns used by the app.
+      // - reports_cache:*  -> reports module caches
+      // - <tab>_cache_v1    -> inventory per-tab caches (consumables_cache_v1, medicines_cache_v1, equipment_cache_v1)
+      // - dashboard_inventory_cache_v2 -> dashboard inventory cache
+      // - dashboard_usage_trend_v1 -> dashboard trend cache
+      const keysToRemove = [];
+      for (let i = 0; i < sessionStorage.length; i++) {
+        const key = sessionStorage.key(i);
+        if (!key) continue;
+        if (typeof key !== 'string') continue;
+        if (key.startsWith('reports_cache:')) keysToRemove.push(key);
+        else if (/^(consumables|medicines|equipment)_cache_v1$/.test(key)) keysToRemove.push(key);
+        else if (key === 'dashboard_inventory_cache_v2' || key === 'dashboard_usage_trend_v1') keysToRemove.push(key);
+      }
+      keysToRemove.forEach(k => { try { sessionStorage.removeItem(k); } catch (e) {} });
+    } catch (e) {
+      // defensive: if anything goes wrong, do not block the app
+      console.warn('Session cache cleanup failed', e);
+    }
+  }, []);
+
   return (
     <>
       <LoadingOverlay open={isLoading} text="medicare" />

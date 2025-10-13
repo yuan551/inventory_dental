@@ -13,7 +13,14 @@ import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 export const AppHeader = ({ title, subtitle, searchPlaceholder = "Search inventory" }) => {
   const lastName = useLastName();
-  const { alerts } = useAlerts();
+  const { stockAlerts, expiryAlerts } = useAlerts();
+  // Combine synthetic alerts into a single list for the header notification dropdown
+  const alerts = React.useMemo(() => {
+    const ex = (expiryAlerts || []).map(e => ({ ...e, type: 'expiry' }));
+    const st = (stockAlerts || []).map(s => ({ ...s, type: 'stock' }));
+    // show expiry first then stock (this ordering matches AlertsModule)
+    return [...ex, ...st];
+  }, [stockAlerts, expiryAlerts]);
   const [open, setOpen] = useState(false);
   const [openProfile, setOpenProfile] = useState(false);
   const [position, setPosition] = useState(null);
@@ -92,6 +99,104 @@ export const AppHeader = ({ title, subtitle, searchPlaceholder = "Search invento
   const displayedAlerts = useMemo(() => (alerts || []).slice(0, 25), [alerts]);
   const markAsRead = (a) => setReadMap((prev) => ({ ...prev, [keyFor(a)]: Date.now() }));
   const markAllAsRead = () => setReadMap((prev) => ({ ...prev, ...Object.fromEntries((alerts || []).map((a) => [keyFor(a), Date.now()])) }));
+
+  // Search highlighting (non-invasive): highlight matching text in the current page (main)
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // inject minimal highlight style once
+  useEffect(() => {
+    const id = 'search-highlight-style';
+    if (!document.getElementById(id)) {
+      const style = document.createElement('style');
+      style.id = id;
+      style.innerHTML = `
+        .search-highlight { background: rgba(250, 213, 102, 0.9); padding: 0 2px; border-radius: 2px; color: inherit; }
+      `;
+      document.head.appendChild(style);
+    }
+  }, []);
+
+  const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  // attempt to locate the sidebar element (by its distinctive teal background) so we can exclude it
+  const locateSidebarRoot = () => {
+    try {
+      const divs = Array.from(document.querySelectorAll('div'));
+      for (const d of divs) {
+        const bg = getComputedStyle(d).backgroundColor || '';
+        if (bg && bg.indexOf('0, 183, 194') !== -1) return d; // rgb(0, 183, 194) matches #00B7C2
+      }
+    } catch (e) {}
+    return null;
+  };
+
+  const removeHighlights = (root = document.querySelector('main') || document.body) => {
+    try {
+      const marks = Array.from(root.querySelectorAll('.search-highlight'));
+      for (const m of marks) {
+        const txt = document.createTextNode(m.textContent || '');
+        m.parentNode.replaceChild(txt, m);
+      }
+      // normalize text nodes to merge adjacent text nodes
+      root.normalize && root.normalize();
+    } catch (e) { /* ignore */ }
+  };
+
+  const highlightPage = (q) => {
+    const root = document.querySelector('main') || document.body;
+    if (!q) { removeHighlights(root); return; }
+    const pattern = new RegExp(escapeRegExp(q), 'gi');
+
+    try {
+      const sidebarRoot = locateSidebarRoot();
+      // collect text nodes first to avoid modifying the live TreeWalker while iterating
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+      const nodes = [];
+      let node;
+      while ((node = walker.nextNode())) {
+        // skip inputs, textareas, script, style or nodes inside header/sidebar
+        const parentEl = node.parentElement;
+        if (!parentEl) continue;
+        const tag = parentEl.tagName.toLowerCase();
+        if (['script', 'style', 'textarea', 'input', 'select'].includes(tag)) continue;
+        if (parentEl.closest && parentEl.closest('header')) continue;
+        if (parentEl.closest && parentEl.closest('nav')) continue;
+        // exclude if inside the computed sidebar root
+        if (sidebarRoot && sidebarRoot.contains(parentEl)) continue;
+        if (!node.nodeValue || !pattern.test(node.nodeValue)) continue;
+        nodes.push(node);
+      }
+
+      for (const textNode of nodes) {
+        const val = textNode.nodeValue;
+        const frag = document.createDocumentFragment();
+        let lastIndex = 0;
+        pattern.lastIndex = 0;
+        let m;
+        while ((m = pattern.exec(val)) !== null) {
+          const before = val.slice(lastIndex, m.index);
+          if (before) frag.appendChild(document.createTextNode(before));
+          const mark = document.createElement('span');
+          mark.className = 'search-highlight';
+          mark.textContent = m[0];
+          frag.appendChild(mark);
+          lastIndex = m.index + m[0].length;
+        }
+        const after = val.slice(lastIndex);
+        if (after) frag.appendChild(document.createTextNode(after));
+        textNode.parentNode.replaceChild(frag, textNode);
+      }
+    } catch (e) { console.warn('highlightPage failed', e); }
+  };
+
+  // debounce search to avoid heavy DOM ops while typing
+  useEffect(() => {
+    const q = (searchQuery || '').trim();
+    const id = setTimeout(() => {
+      if (!q) removeHighlights(); else highlightPage(q);
+    }, 180);
+    return () => clearTimeout(id);
+  }, [searchQuery]);
   return (
     <>
     <header className="bg-white shadow-sm px-8 py-6 flex items-center justify-between border-b border-gray-200">
@@ -111,6 +216,8 @@ export const AppHeader = ({ title, subtitle, searchPlaceholder = "Search invento
           <Input
             placeholder={searchPlaceholder}
             className="w-96 h-14 bg-gray-50 rounded-full border border-gray-300 pl-6 pr-14 [font-family:'Oxygen',Helvetica] font-normal text-gray-700 text-sm focus:bg-white focus:border-[#00b7c2] focus:ring-2 focus:ring-[#00b7c2]/20"
+            onChange={(e) => setSearchQuery(e.target.value)}
+            value={searchQuery}
           />
           <SearchIcon className="absolute right-6 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
         </div>
@@ -141,6 +248,10 @@ export const AppHeader = ({ title, subtitle, searchPlaceholder = "Search invento
                 <div className="flex items-center gap-4">
                   <div className="flex items-center gap-2">
                     <span className="inline-block w-3 h-3 rounded-full bg-red-500" />
+                    <span className="text-xs text-gray-600">Expiry</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="inline-block w-3 h-3 rounded-full bg-red-500" />
                     <span className="text-xs text-gray-600">Critical</span>
                   </div>
                   <div className="flex items-center gap-2">
@@ -162,9 +273,11 @@ export const AppHeader = ({ title, subtitle, searchPlaceholder = "Search invento
                 displayedAlerts.map((a, i) => {
                   const isRead = Boolean(readMap[keyFor(a)]);
                   // Replace per-alert icon with colored dot in the item line
-                  const iconDot = a.severity === 'Critical'
+                  const iconDot = a.type === 'expiry'
                     ? <span className="inline-block w-3 h-3 rounded-full bg-red-500" />
-                    : <span className="inline-block w-3 h-3 rounded-full bg-amber-500" />;
+                    : (a.severity === 'Critical'
+                      ? <span className="inline-block w-3 h-3 rounded-full bg-red-500" />
+                      : <span className="inline-block w-3 h-3 rounded-full bg-amber-500" />);
                   return (
                     <div key={i} className={`px-4 py-3 transition-colors cursor-pointer ${isRead ? 'opacity-70 hover:bg-gray-50' : 'hover:bg-gray-50'}`}> 
                       <div className="flex items-start gap-3">

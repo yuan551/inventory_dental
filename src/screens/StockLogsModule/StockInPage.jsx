@@ -22,7 +22,7 @@ export const StockInPage = () => {
       </div>
 
       <div className="flex-1 flex flex-col">
-        <AppHeader title="STOCK IN" subtitle="All new orders added to inventory" />
+  <AppHeader title="STOCK IN" subtitle="All new orders added to inventory" searchPlaceholder="Search stock in" />
 
         {/* (Outer navigation is handled by the top tabs; inner tabs below control Stock In views) */}
 

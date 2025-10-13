@@ -38,8 +38,22 @@ export const DashboardModule = () => {
       try {
         const raw = sessionStorage.getItem(CACHE_KEY);
         if (!raw) return null;
-        const { at, items } = JSON.parse(raw);
+        const parsed = JSON.parse(raw);
+        const { at, items } = parsed;
         if (Date.now() - at > TTL_MS) return null;
+        // sessionStorage serializes Date -> string. Restore expiration back to Date
+        try {
+          if (Array.isArray(items)) {
+            for (const it of items) {
+              try {
+                if (it && it.expiration) {
+                  // parseDate is declared later in this scope but will be available when tryLoadCache is executed
+                  it.expiration = parseDate(it.expiration) || it.expiration;
+                }
+              } catch (e) { /* ignore individual parse errors */ }
+            }
+          }
+        } catch (e) { /* ignore cache reparsing errors */ }
         return items;
       } catch { return null; }
     };
@@ -324,7 +338,7 @@ export const DashboardModule = () => {
       </aside>
 
       <main className="flex-1 flex flex-col overflow-hidden">
-  <AppHeader title="DASHBOARD" subtitle={subtitle} />
+  <AppHeader title="DASHBOARD" subtitle={subtitle} searchPlaceholder="Search dashboard" />
 
         {/* Content Area */}
   <div className="flex-1 flex flex-col px-8 py-6 overflow-hidden" style={{backgroundColor: '#F5F5F5'}}>
