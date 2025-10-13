@@ -4,7 +4,7 @@ import { Search as SearchIcon } from "lucide-react";
 import { DashboardSidebarSection } from "../DashboardModule/sections/DashboardSidebarSection/DashboardSidebarSection";
 import { AppHeader } from "../../components/layout/AppHeader";
 import { db } from "../../firebase";
-import { collection, addDoc, onSnapshot, query, orderBy, updateDoc, doc, serverTimestamp } from "firebase/firestore";
+import { collection, addDoc, onSnapshot, query, orderBy, updateDoc, doc, serverTimestamp, getDocs, where } from "firebase/firestore";
 
 // icons (swapped from emoji to project's asset icons)
 import TotalWasteIcon from '../../assets/Waste and Disposal/Total Waste Items.png';
@@ -196,29 +196,125 @@ export const WasteModule = () => {
     }
 
   // default reason to 'Damaged' if user doesn't pick one (we only support three reasons)
-  const newItemPayload = {
-    name: form.name,
-    quantity: String(qty),
-    reason: form.reason || 'Damaged',
-    disposalDate: form.disposalDate || '',
-    valueLost: Number(form.valueLost) || 0,
-    status: 'Pending Disposal',
-    notes: form.notes ? [{ text: form.notes, created_at: new Date().toISOString() }] : [],
-    created_at: serverTimestamp()
-  };
-
-  // Optimistic local update for snappy UI
-  const localId = `wst-${Date.now()}`;
-  const newItem = { id: localId, ...newItemPayload, notes: newItemPayload.notes };
-  setItems(prev => [newItem, ...prev]);
-  setForm({ name: '', quantity: '', reason: '', disposalDate: '', valueLost: '', notes: '' });
-  setError('');
-
-  // Try to persist to Firestore; if it fails, we keep the local state so the UI still works offline
   (async () => {
+    const payloadBase = {
+      name: form.name,
+      quantity: String(qty),
+      reason: form.reason || 'Damaged',
+      disposalDate: form.disposalDate || '',
+      valueLost: Number(form.valueLost) || 0,
+      status: 'Pending Disposal',
+      notes: form.notes ? [{ text: form.notes, created_at: new Date().toISOString() }] : [],
+      created_at: serverTimestamp()
+    };
+
+    // Try to find a matching inventory item across categories to decrement quantity and compute valueLost
+    const cols = ['consumables', 'medicines', 'equipment'];
+    let matched = null;
+    for (const colName of cols) {
+      try {
+        // try matching by item_name or item fields
+        const q1 = query(collection(db, colName), where('item_name', '==', form.name));
+        let snap = await getDocs(q1);
+        if (snap.empty) {
+          const q2 = query(collection(db, colName), where('item', '==', form.name));
+          snap = await getDocs(q2);
+        }
+        if (!snap.empty) {
+          const docSnap = snap.docs[0];
+          const d = docSnap.data() || {};
+          matched = { col: colName, id: docSnap.id, data: d };
+          break;
+        }
+      } catch (e) {
+        console.warn('Failed searching inventory for waste match in', colName, e);
+      }
+    }
+
+    let finalPayload = { ...payloadBase };
+    // If no inventory match found, block the add and show validation error
+    if (!matched) {
+      setError('Item not found in inventory. Please enter an exact existing item name.');
+      return;
+    }
+    // If matched, compute valueLost and decrement inventory
+    if (matched) {
+      try {
+        // read numeric current quantity
+        let curQty = 0;
+        try {
+          if (typeof matched.data.quantity === 'number') curQty = Number(matched.data.quantity || 0);
+          else if (typeof matched.data.quantity === 'string') {
+            const m = /^\s*(\d+)/.exec(matched.data.quantity || '0');
+            curQty = m ? Number(m[1]) : 0;
+          }
+        } catch (e) { curQty = 0; }
+
+        // parse unit cost from various fields
+        const parsePossibleCost = (v) => {
+          try {
+            if (v === null || v === undefined) return 0;
+            if (typeof v === 'number') return v;
+            if (typeof v === 'string') {
+              const cleaned = v.replace(/[^0-9.\-]/g, '');
+              const m = cleaned.match(/-?\d+(?:\.\d+)?/);
+              return m ? Number(m[0]) : 0;
+            }
+            return Number(v) || 0;
+          } catch (e) { return 0; }
+        };
+
+        const unitCost = parsePossibleCost(matched.data.unit_cost ?? matched.data.unitCost ?? matched.data.unitPrice ?? matched.data.price ?? 0);
+        const unitLabel = (matched.data.units || matched.data.unit || 'boxes');
+        const removeQty = Math.min(curQty, qty);
+        const newQty = Math.max(0, curQty - removeQty);
+
+        // compute value lost
+        const loss = unitCost * removeQty;
+        finalPayload = { ...payloadBase, quantity: `${removeQty}`, valueLost: loss };
+
+        // Persist inventory decrement
+        try {
+          const docRef = doc(db, matched.col, matched.id);
+          // update numeric quantity field in firestore
+          await updateDoc(docRef, { quantity: newQty });
+        } catch (e) { console.warn('Failed to update inventory quantity for waste', e); }
+
+        // Update sessionStorage cache for the category if present so inventory table updates immediately
+        try {
+          const cacheKey = `${matched.col}_cache_v1`;
+          const raw = sessionStorage.getItem(cacheKey);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            const rows = (parsed.rows || []).map(r => r._id === matched.id ? { ...r, quantity: `${newQty} ${unitLabel}`, status: newQty <= 20 ? 'Critical' : newQty <= 60 ? 'Low Stock' : 'In Stock' } : r);
+            sessionStorage.setItem(cacheKey, JSON.stringify({ at: Date.now(), rows }));
+          }
+        } catch (e) { /* non-critical */ }
+
+        // Notify other parts of app to refresh usage/dashboard
+        try { window.dispatchEvent(new CustomEvent('usage:refresh')); } catch (e) {}
+
+      } catch (e) { console.warn('Failed computing/decrementing matched inventory', e); }
+    }
+
+    // Use unit label if matched to append to displayed quantity
+    if (matched) {
+      finalPayload.quantity = `${finalPayload.quantity} ${matched.data.units || matched.data.unit || 'boxes'}`;
+    } else {
+      finalPayload.quantity = `${finalPayload.quantity} boxes`;
+    }
+
+    // Optimistic local update for snappy UI
+    const localId = `wst-${Date.now()}`;
+    const newItem = { id: localId, ...finalPayload, notes: finalPayload.notes };
+    setItems(prev => [newItem, ...prev]);
+    setForm({ name: '', quantity: '', reason: '', disposalDate: '', valueLost: '', notes: '' });
+    setError('');
+
+    // Try to persist to Firestore; if it fails, we keep the local state so the UI still works offline
     try {
       const col = collection(db, 'waste_items');
-      const ref = await addDoc(col, newItemPayload);
+      const ref = await addDoc(col, finalPayload);
       // Replace the optimistic local id with the server id when available
       setItems(prev => prev.map(it => it.id === localId ? { ...it, id: ref.id } : it));
     } catch (err) {
@@ -425,7 +521,12 @@ export const WasteModule = () => {
                     {filtered.map(it => (
                       <tr key={it.id} className="border-t last:border-b-0 border-gray-200">
                         <td className="py-3 align-top" style={{width: '38%'}}><div className="font-semibold text-sm leading-5 text-gray-900">{it.name}</div></td>
-                        <td className="py-3 text-sm align-top"><div className="font-semibold text-gray-900">{it.quantity}</div></td>
+                        <td className="py-3 text-sm align-top"><div className="font-semibold text-gray-900">{(() => {
+                          const q = String(it.quantity || '');
+                          // If quantity already includes non-digit characters assume it has units
+                          if (/\D/.test(q)) return q;
+                          return `${q} boxes`;
+                        })()}</div></td>
                         <td className="py-3 align-top"><ReasonBadge reason={it.reason} /></td>
                         <td className="py-3 text-sm align-top"><div className="font-semibold text-gray-900">{it.disposalDate || '-'}</div></td>
                         <td className="py-3 text-sm text-red-600 align-top">{(Number(it.valueLost) || 0).toLocaleString('en-PH', { style: 'currency', currency: 'PHP' })}</td>

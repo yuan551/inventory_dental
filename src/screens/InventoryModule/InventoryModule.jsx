@@ -258,6 +258,9 @@ export const InventoryModule = () => {
   const handleToggleEdit = async () => {
     // If enabling edit mode, clear prior validation errors
     if (!editMode) {
+      // disable select mode when entering edit mode
+      setSelectMode(false);
+      setSelectedRows(new Set());
       setEditValidationErrors([]);
       setEditMode(true);
       return;
@@ -337,15 +340,42 @@ export const InventoryModule = () => {
   const handleToggleSelect = () => {
     setSelectMode((v) => {
       const next = !v;
+      if (next) {
+        // disable edit mode when entering select mode
+        setEditMode(false);
+        setEditedRows({});
+        setEditValidationErrors([]);
+        setIsConfirmSaveOpen(false);
+        setIsValidationModalOpen(false);
+      }
       if (!next) setSelectedRows(new Set());
       return next;
     });
   };
   // Select all rows across the entire inventory (all categories) and enable select mode
-  const handleSelectAll = () => {
+  const handleSelectAll = async () => {
     try {
-      const ids = Object.keys(dataMap || {}).flatMap((cat) => (dataMap[cat] || []).filter(r => r && r._id !== 'dummy').map(r => r._id));
-      setSelectedRows(new Set(ids.filter(Boolean)));
+      // Ensure we consider every known tab (consumables, medicines, equipment)
+      const cols = tabs.map(t => t.id);
+      const allIds = [];
+      for (const col of cols) {
+        let rows = dataMap[col];
+        // If we don't have rows for this category in memory, fetch them now
+        if (!rows || rows.length === 0) {
+          try {
+            const snap = await getDocs(collection(db, col));
+            rows = snap.docs.filter(d => !isPlaceholderDoc(d.id, d.data())).map(mapDocToRow);
+            // cache into dataMap so subsequent actions use the in-memory list
+            setDataMap((prev) => ({ ...prev, [col]: rows }));
+            try { sessionStorage.setItem(getCacheKey(col), JSON.stringify({ at: Date.now(), rows })); } catch {}
+          } catch (e) {
+            console.warn('Failed fetching tab for select all', col, e);
+            rows = [];
+          }
+        }
+        allIds.push(...(rows || []).filter(r => r && r._id !== 'dummy').map(r => r._id));
+      }
+      setSelectedRows(new Set(allIds.filter(Boolean)));
       setSelectMode(true);
       // keep Quick Actions closed for consistent UX
       setQaOpen(false);
@@ -981,7 +1011,15 @@ export const InventoryModule = () => {
   };
 
   const adjustStockOutQty = (id, delta) => {
-    setStockOutItems((prev) => prev.map((it) => it.id === id ? { ...it, outQty: Math.max(0, (it.outQty || 0) + delta) } : it));
+    setStockOutItems((prev) => prev.map((it) => {
+      if (it.id !== id) return it;
+      const cur = Number(it.currentQty || 0);
+      const MIN_REMAINING = 10; // keep at least 10 for constrained items
+      const maxAllowed = (it.status === 'Low Stock' || it.status === 'Critical') ? Math.max(0, cur - MIN_REMAINING) : cur;
+      const next = Math.max(0, (Number(it.outQty) || 0) + delta);
+      const clamped = Math.min(next, maxAllowed);
+      return { ...it, outQty: clamped };
+    }));
   };
 
   const confirmStockOut = async () => {
@@ -1008,11 +1046,21 @@ export const InventoryModule = () => {
     }
     setStockOutValidationMessage('');
     // Precompute summary with stable ids to avoid category/index mismatches
-    const summary = stockOutItems.map(({ id, category, name, currentQty, outQty, unit }) => {
+    const summary = stockOutItems.map(({ id, category, name, currentQty, outQty, unit, status }) => {
       const numericOut = typeof outQty === 'number' ? outQty : parseInt(outQty, 10) || 0;
       const after = Math.max(0, (currentQty || 0) - numericOut);
-      return { id, category, name, before: currentQty, out: numericOut, after, unit };
+      return { id, category, name, before: currentQty, out: numericOut, after, unit, status };
     });
+
+  // Business rule: enforce minimum remaining stock per item (leave at least 10 units)
+  // The user requested that items cannot be fully drained; ensure remaining >= 10
+  const MIN_REMAINING = 10;
+    // Only enforce the minimum remaining rule for items that are already Low Stock or Critical
+    const violatesMin = summary.find(s => (s.status === 'Low Stock' || s.status === 'Critical') && s.after < MIN_REMAINING);
+    if (violatesMin) {
+      setStockOutValidationMessage(`Cannot stock out "${violatesMin.name}" — remaining would be ${violatesMin.after}. Please leave at least ${MIN_REMAINING} ${violatesMin.unit}.`);
+      return;
+    }
 
     // Update in-memory data per category
     setDataMap((prev) => {
@@ -1803,11 +1851,13 @@ export const InventoryModule = () => {
                             if (it.status === 'Critical') return;
                             let raw = e.target.value.replace(/[^0-9]/g, '');
                             if (raw.length > 4) raw = raw.slice(0,4);
-                            // clamp to available quantity so users cannot type more than currentQty
                             if (raw !== '') {
                               const n = parseInt(raw, 10) || 0;
-                              const max = Number(it.currentQty || 0);
-                              if (!isNaN(max) && n > max) raw = String(max);
+                              const cur = Number(it.currentQty || 0);
+                              const MIN_REMAINING = 10; // keep at least 10 units for constrained items
+                              const maxAllowed = (it.status === 'Low Stock' || it.status === 'Critical') ? Math.max(0, cur - MIN_REMAINING) : cur;
+                              const clamped = Math.min(n, maxAllowed);
+                              raw = String(clamped);
                             }
                             setStockOutItems(prev => prev.map(p => p.id === it.id ? { ...p, outQty: raw } : p));
                           }}
@@ -1883,6 +1933,11 @@ export const InventoryModule = () => {
                   </Button>
                   {!anyPositive && <div className="text-xs text-gray-400">Enter at least one quantity greater than zero</div>}
                   {anyPositive && !allFilled && <div className="text-xs text-red-500">Please fill quantity for all selectable items (enter 0 if not stocking out this item)</div>}
+                  {stockOutValidationMessage && (
+                    <div role="alert" aria-live="polite" className="text-xs text-red-500 text-center max-w-[520px] px-3">
+                      {stockOutValidationMessage}
+                    </div>
+                  )}
                 </div>
               );
             })()}

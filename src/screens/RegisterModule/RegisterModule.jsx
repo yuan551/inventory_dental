@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { createUserWithEmailAndPassword } from "firebase/auth";
-import { doc, setDoc } from "firebase/firestore";
+import { createUserWithEmailAndPassword, sendEmailVerification } from "firebase/auth";
+import { doc, setDoc, query, collection, where, getDocs } from "firebase/firestore";
 import { auth, db } from "../../firebase";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -13,6 +13,7 @@ export const RegisterModule = () => {
     firstName: "",
     lastName: "",
     middleName: "",
+    position: "",
     email: "",
     password: "",
     confirmPassword: ""
@@ -34,7 +35,7 @@ export const RegisterModule = () => {
     setLoading(true);
 
     // Validation
-    if (!formData.firstName || !formData.lastName || !formData.email || !formData.password) {
+    if (!formData.firstName || !formData.lastName || !formData.email || !formData.password || !formData.position) {
       setError("Please fill in all required fields");
       setLoading(false);
       return;
@@ -53,6 +54,20 @@ export const RegisterModule = () => {
     }
 
     try {
+      // Pre-check: ensure no account document with this email already exists
+      try {
+        const q = query(collection(db, 'accounts'), where('email', '==', formData.email));
+        const snap = await getDocs(q);
+        if (snap && snap.size > 0) {
+          setError('An account with this email already exists. Please login or use a different email.');
+          setLoading(false);
+          return;
+        }
+      } catch (e) {
+        // if the check fails due to permissions or network, fall back to attempting registration
+        console.warn('Pre-check for existing account failed; proceeding with registration attempt.', e);
+      }
+
       // Create user with Firebase Authentication
       const userCredential = await createUserWithEmailAndPassword(
         auth,
@@ -68,14 +83,24 @@ export const RegisterModule = () => {
         first_name: formData.firstName,
         last_name: formData.lastName,
         middle_name: formData.middleName,
+        position: formData.position,
         createdAt: new Date(),
         uid: user.uid
       });
 
       console.log("User registered successfully!");
+      try {
+        // Send verification email
+        if (auth && user) {
+          await sendEmailVerification(user);
+          console.log('Verification email sent to', user.email);
+        }
+      } catch (e) {
+        console.warn('Failed to send verification email:', e);
+      }
       
-      // Navigate to login page after successful registration
-      navigate("/");
+  // Navigate to login page after successful registration
+  navigate("/");
       
     } catch (error) {
       console.error("Registration error:", error);
@@ -87,7 +112,7 @@ export const RegisterModule = () => {
   return (
   <div className="bg-white h-screen w-full flex overflow-hidden relative">
   {/* Left side - Registration Form */}
-  <div className="w-full lg:w-1/2 box-border flex flex-col justify-center items-center px-8 lg:px-16 xl:px-24 overflow-y-auto">
+  <div className="w-full lg:w-1/2 box-border flex flex-col justify-center items-center px-8 lg:px-16 xl:px-24 overflow-hidden">
         <div className="w-full max-w-2xl mx-auto lg:mx-0 py-8">
           <h1 className="[font-family:'Inter',Helvetica] font-extrabold text-[#00b7c2] text-3xl sm:text-4xl lg:text-5xl mb-3">
             Create Account
@@ -105,6 +130,7 @@ export const RegisterModule = () => {
 
           <form onSubmit={handleSubmit}>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Row 1 */}
               <div>
                 <Label className="[font-family:'Oxygen',Helvetica] font-normal text-[#42424280] text-base lg:text-lg mb-2 block">
                   First Name
@@ -135,6 +161,7 @@ export const RegisterModule = () => {
                 />
               </div>
 
+              {/* Row 2 */}
               <div>
                 <Label className="[font-family:'Oxygen',Helvetica] font-normal text-[#42424280] text-base lg:text-lg mb-2 block">
                   Last Name
@@ -165,6 +192,7 @@ export const RegisterModule = () => {
                 />
               </div>
 
+              {/* Row 3 */}
               <div>
                 <Label className="[font-family:'Oxygen',Helvetica] font-normal text-[#42424280] text-base lg:text-lg mb-2 block">
                   Middle Name
@@ -193,28 +221,47 @@ export const RegisterModule = () => {
                   required
                 />
               </div>
+
+              {/* Position - single column (same size as Middle Name) */}
+              <div>
+                <Label className="[font-family:'Oxygen',Helvetica] font-normal text-[#42424280] text-base lg:text-lg mb-2 block">
+                  Position
+                </Label>
+                <select
+                  name="position"
+                  value={formData.position}
+                  onChange={handleInputChange}
+                  className="w-full h-14 bg-white rounded-[30px] border-2 border-solid border-[#00b7c2] px-6 [font-family:'Source_Code_Pro',Helvetica] text-[#42424280]"
+                >
+                  <option value="">Select Position</option>
+                  <option value="Office Manager">Office Manager</option>
+                  <option value="Administrative Assistant">Administrative Assistant</option>
+                  <option value="Front Desk Staff">Front Desk Staff</option>
+                  <option value="Dentist">Dentist</option>
+                </select>
+              </div>
             </div>
 
-            <Button 
-              type="submit" 
-              disabled={loading}
-              className="w-full md:w-1/2 h-14 mt-8 bg-[#00b7c2] rounded-[30px] border-0 [font-family:'Inter',Helvetica] font-bold text-white text-lg lg:text-xl hover:bg-[#009ba5] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? "Creating Account..." : "Create Account"}
-            </Button>
-          </form>
+            <div className="mt-8 flex flex-col items-center gap-3">
+              <Button
+                type="submit"
+                disabled={loading}
+                className="w-full md:w-1/2 h-14 bg-[#00b7c2] rounded-[30px] border-0 [font-family:'Inter',Helvetica] font-bold text-white text-lg lg:text-xl hover:bg-[#009ba5] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loading ? "Creating Account..." : "Create Account"}
+              </Button>
 
-          <div className="text-center mt-4">
-            <span className="[font-family:'Oxygen',Helvetica] font-normal text-[#42424280] text-xs lg:text-sm">
-              Already had an account?{" "}
-            </span>
-            <button
-              className="underline bg-transparent border-none cursor-pointer text-[#42424280] [font-family:'Oxygen',Helvetica] font-normal text-xs lg:text-sm"
-              onClick={() => navigate("/")}
-            >
-              Login
-            </button>
-          </div>
+              <div className="text-center text-xs lg:text-sm text-[#42424280] [font-family:'Oxygen',Helvetica]">
+                <span className="font-normal">Already had an account? </span>
+                <button
+                  className="underline bg-transparent border-none cursor-pointer text-[#42424280] font-normal"
+                  onClick={() => navigate("/")}
+                >
+                  Login
+                </button>
+              </div>
+            </div>
+          </form>
         </div>
       </div>
 

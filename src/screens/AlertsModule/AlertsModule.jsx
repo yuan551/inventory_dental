@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { DashboardSidebarSection } from "../DashboardModule/sections/DashboardSidebarSection/DashboardSidebarSection";
 import { AppHeader } from "../../components/layout/AppHeader";
-import { collection, onSnapshot, orderBy, query } from 'firebase/firestore';
+import { collection, onSnapshot, orderBy, query, doc, updateDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { useAlerts } from '../../hooks/useAlerts';
 import totalIcon from "../../assets/Alerts/Total Alerts.png";
@@ -40,6 +40,7 @@ export const AlertsModule = () => {
   });
   // Add deleted state
   const [deletedIds, setDeletedIds] = useState([]);
+  const [readMap, setReadMap] = useState({});
 
   useEffect(() => {
     const handler = (e) => setSidebarCollapsed(Boolean(e.detail?.collapsed));
@@ -81,13 +82,28 @@ export const AlertsModule = () => {
     return () => { try { if (unsub) unsub(); } catch {} };
   }, []);
 
+  // Subscribe to persisted reads for synthetic alerts (and any client-side persisted reads)
+  useEffect(() => {
+    let unsub = null;
+    try {
+      const col = collection(db, 'alert_reads');
+      unsub = onSnapshot(col, (snap) => {
+        const map = {};
+        snap.forEach(d => { map[d.id] = d.data(); });
+        setReadMap(map);
+      }, (err) => console.warn('alerts: alert_reads listener error', err));
+    } catch (e) { console.warn('alerts: failed subscribing to alert_reads', e); }
+    return () => { try { if (unsub) unsub(); } catch {} };
+  }, []);
+
   // Merge notifications with stock-derived alerts from useAlerts()
   useEffect(() => {
     // Map stockAlerts (from useAlerts) into UI alert shape
     const stockMapped = (stockAlerts || []).map((s, idx) => ({
       id: `stock-${s.item}-${s.category}-${idx}`,
       type: 'stock',
-      unread: true,
+      // consult persisted read map if present
+      unread: !((readMap && readMap[`stock-${s.item}-${s.category}-${idx}`] && readMap[`stock-${s.item}-${s.category}-${idx}`].unread === false)),
       title: `${s.item} ${s.severity}`,
       message: s.reason,
       datetime: new Date().toISOString(),
@@ -96,7 +112,13 @@ export const AlertsModule = () => {
     }));
 
     // Combine notifications (server) first then stock alerts so stock shows in Stock tab
-    setAlerts([...(notifList || []), ...stockMapped]);
+    // When merging, also consider persisted reads for server notifications (if any exist in alert_reads)
+    const mergedServer = (notifList || []).map(n => {
+      const persisted = readMap && readMap[n.id];
+      if (persisted && persisted.unread === false) return { ...n, unread: false };
+      return n;
+    });
+    setAlerts([...mergedServer, ...stockMapped]);
   }, [notifList, stockAlerts]);
 
   const counts = useMemo(() => {
@@ -164,7 +186,19 @@ export const AlertsModule = () => {
 
   // Mark as read
   function markAsRead(id) {
+    // update local state immediately
     setAlerts((prev) => prev.map((a) => (a.id === id ? { ...a, unread: false } : a)));
+    try {
+      // If this is a server notification id, update its document
+      if (!id.startsWith('stock-')) {
+        const nDoc = doc(db, 'notifications', id);
+        updateDoc(nDoc, { unread: false }).catch(() => {});
+      } else {
+        // persist read state for synthetic stock alerts
+        const rDoc = doc(db, 'alert_reads', id);
+        setDoc(rDoc, { unread: false, updated_at: serverTimestamp() }).catch(() => {});
+      }
+    } catch (e) { console.warn('markAsRead: persistence failed', e); }
   }
 
   // Delete alert
@@ -172,9 +206,21 @@ export const AlertsModule = () => {
     setDeletedIds((prev) => [...prev, id]);
   }
 
-	function markAllAsRead() {
-		setAlerts((prev) => prev.map((a) => ({ ...a, unread: false })));
-	}
+  async function markAllAsRead() {
+    setAlerts((prev) => prev.map((a) => ({ ...a, unread: false })));
+    try {
+      // Update server notifications in batch-ish (best-effort)
+      const serverIds = alerts.filter(a => !a.id.startsWith('stock-')).map(a => a.id);
+      for (const id of serverIds) {
+        try { await updateDoc(doc(db, 'notifications', id), { unread: false }); } catch (e) { /* ignore individual failures */ }
+      }
+      // Persist synthetic stock alert reads
+      const stockIds = alerts.filter(a => a.id && a.id.startsWith('stock-')).map(a => a.id);
+      for (const sid of stockIds) {
+        try { await setDoc(doc(db, 'alert_reads', sid), { unread: false, updated_at: serverTimestamp() }); } catch (e) {}
+      }
+    } catch (e) { console.warn('markAllAsRead: persistence failed', e); }
+  }
 
 	function formatDate(iso) {
 		try {

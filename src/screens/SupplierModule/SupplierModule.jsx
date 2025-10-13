@@ -80,22 +80,32 @@ export const SupplierModule = () => {
       (snap) => {
         if (snap.metadata && snap.metadata.fromCache) return; // ignore local cache updates
         setSuppliers(
-          snap.docs.map((doc) => {
-            const data = doc.data();
-            return {
-              id: doc.id,
-              name: data.supplier,
-              address: data.address || "",
-              contactName: data.contact_person || "",
-              email: data.email || "",
-              phone: data.contact_number || "",
-              category: data.category || "",
-              rating: data.rating || "",
-              totalOrders: data.total_orders || "",
-              lastOrder: data.last_orders || "",
-              status: data.status || "",
-            };
-          })
+          snap.docs
+            .filter((d) => {
+              // Exclude known sentinel placeholder docs by id or explicit placeholder flag
+              if (!d) return false;
+              const id = d.id;
+              const data = d.data() || {};
+              if (id === 'dont' || id === 'dummy') return false;
+              if (data.placeholder === true) return false;
+              return true;
+            })
+            .map((doc) => {
+              const data = doc.data();
+              return {
+                id: doc.id,
+                name: data.supplier,
+                address: data.address || "",
+                contactName: data.contact_person || "",
+                email: data.email || "",
+                phone: data.contact_number || "",
+                category: data.category || "",
+                rating: data.rating || "",
+                totalOrders: data.total_orders || "",
+                lastOrder: data.last_orders || "",
+                status: data.status || "",
+              };
+            })
         );
       }
     );

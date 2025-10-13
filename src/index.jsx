@@ -5,6 +5,7 @@ import LoadingOverlay from "./components/LoadingOverlay";
 import { LoginModule } from "./screens/LoginModule/LoginModule";
 import { RegisterModule } from "./screens/RegisterModule/RegisterModule";
 import { DashboardModule } from "./screens/DashboardModule/DashboardModule";
+import RequireAuth from './components/RequireAuth';
 import { InventoryModule } from "./screens/InventoryModule/InventoryModule";
 import { StockLogsModule } from "./screens/StockLogsModule/StockLogsModule";
 import { StockInPage } from "./screens/StockLogsModule/StockInPage";
@@ -52,7 +53,7 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <LoginModule /> },
       { path: 'register', element: <RegisterModule /> },
-      { path: 'dashboard', element: <DashboardModule /> },
+  { path: 'dashboard', element: <RequireAuth><DashboardModule /></RequireAuth> },
       { path: 'inventory', element: <InventoryModule /> },
       { path: 'stock-logs', element: <StockLogsModule /> },
       { path: 'stock-logs/in', element: <StockInPage /> },
