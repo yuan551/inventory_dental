@@ -628,27 +628,30 @@ export const WasteModule = () => {
                 </div>
               </div>
                 {/* Portal dropdown for status menu to avoid clipping by scroll containers */}
-                {openStatusMenu && typeof document !== 'undefined' && createPortal(
-                  <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }} onMouseDown={() => { setOpenStatusMenu(null); }}>
-                    <div style={{ position: 'fixed', top: dropdownStyle?.top || 0, left: dropdownStyle?.left || 0, minWidth: dropdownStyle?.minWidth || 160 }} onMouseDown={(e) => e.stopPropagation()}>
-                      <div className="bg-white border rounded shadow z-50 animate-dropdown" style={{ overflow: 'hidden' }}>
-                        <button onClick={async () => {
-                          const id = openStatusMenu;
-                          updateStatus(id, 'Disposed');
-                          setOpenStatusMenu(null);
-                          try { if (id && !id.startsWith('wst-')) await updateDoc(doc(db, 'waste_items', id), { status: 'Disposed' }); } catch (e) { console.warn('Failed to persist status', e); }
-                        }} className="w-full text-left px-3 py-2 hover:bg-gray-50">Disposed</button>
-                        <button onClick={async () => {
-                          const id = openStatusMenu;
-                          updateStatus(id, 'Pending Disposal');
-                          setOpenStatusMenu(null);
-                          try { if (id && !id.startsWith('wst-')) await updateDoc(doc(db, 'waste_items', id), { status: 'Pending Disposal' }); } catch (e) { console.warn('Failed to persist status', e); }
-                        }} className="w-full text-left px-3 py-2 hover:bg-gray-50">Pending Disposal</button>
+                {openStatusMenu && typeof document !== 'undefined' && (() => {
+                  const root = getPortalRoot();
+                  if (!root) return null;
+                  return createPortal(
+                    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }} onMouseDown={() => { setOpenStatusMenu(null); }}>
+                      <div style={{ position: 'fixed', top: dropdownStyle?.top || 0, left: dropdownStyle?.left || 0, minWidth: dropdownStyle?.minWidth || 160 }} onMouseDown={(e) => e.stopPropagation()}>
+                        <div className="bg-white border rounded shadow z-50 animate-dropdown" style={{ overflow: 'hidden' }}>
+                          <button onClick={async () => {
+                            const id = openStatusMenu;
+                            // Close dropdown synchronously before async persistence to avoid portal mutation race
+                            setOpenStatusMenu(null);
+                            try { updateStatus(id, 'Disposed'); if (id && !id.startsWith('wst-')) await updateDoc(doc(db, 'waste_items', id), { status: 'Disposed' }); } catch (e) { console.warn('Failed to persist status', e); }
+                          }} className="w-full text-left px-3 py-2 hover:bg-gray-50">Disposed</button>
+                          <button onClick={async () => {
+                            const id = openStatusMenu;
+                            setOpenStatusMenu(null);
+                            try { updateStatus(id, 'Pending Disposal'); if (id && !id.startsWith('wst-')) await updateDoc(doc(db, 'waste_items', id), { status: 'Pending Disposal' }); } catch (e) { console.warn('Failed to persist status', e); }
+                          }} className="w-full text-left px-3 py-2 hover:bg-gray-50">Pending Disposal</button>
+                        </div>
                       </div>
-                    </div>
-                  </div>,
-                  document.body
-                )}
+                    </div>,
+                    root
+                  );
+                })()}
                 </div>
             </div>
             {/* legend placed outside the table card to match design (right-aligned) */}

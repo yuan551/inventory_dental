@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
+import { getPortalRoot } from "../../lib/portal";
 import { DashboardSidebarSection } from "../DashboardModule/sections/DashboardSidebarSection/DashboardSidebarSection";
 import { PendingModal } from "../../components/modals/PendingModal";
 import { AppHeader } from "../../components/layout/AppHeader";
@@ -908,7 +909,10 @@ export const StockLogsModule = () => {
                             {['Received','Pending','Cancelled'].map(status => (
                                 <button key={status} className="w-full text-left px-3 py-2 text-sm hover:bg-[#E9F7FA] text-gray-700 transition-colors" onClick={() => {
                                     const log = getLogById(openStatusFor);
-                                    if (log) handleUpdateStatus(log, status);
+                                    if (log) {
+                                        setOpenStatusFor(null); // Close dropdown before status update
+                                        handleUpdateStatus(log, status);
+                                    }
                                 }}>{status}</button>
                             ))}
                         </div>

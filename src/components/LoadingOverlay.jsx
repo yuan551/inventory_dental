@@ -1,5 +1,6 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
+import { getPortalRoot } from '../lib/portal';
 
 const LoadingOverlay = ({ open = false, text = 'medicare' }) => {
   if (!open) return null;
@@ -18,7 +19,7 @@ const LoadingOverlay = ({ open = false, text = 'medicare' }) => {
       `}</style>
     </div>
   );
-  return createPortal(el, document.body);
+  return createPortal(el, getPortalRoot() || document.body);
 };
 
 export default LoadingOverlay;
