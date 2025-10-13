@@ -254,7 +254,8 @@ export const SupplierModule = () => {
         <AppHeader
           title="SUPPLIER"
           subtitle="Manage your suppliers and vendor relationships"
-        />
+          searchPlaceholder="Search suppliers"
+          />
 
       <div className="flex w-full max-w-full mx-auto mt-6 justify-end items-center gap-5">
         {/* Only show supplier filter when Purchase Orders tab is active */}

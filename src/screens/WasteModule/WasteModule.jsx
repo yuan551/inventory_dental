@@ -3,8 +3,8 @@ import { createPortal } from "react-dom";
 import { Search as SearchIcon } from "lucide-react";
 import { DashboardSidebarSection } from "../DashboardModule/sections/DashboardSidebarSection/DashboardSidebarSection";
 import { AppHeader } from "../../components/layout/AppHeader";
-import { db } from "../../firebase";
-import { collection, addDoc, onSnapshot, query, orderBy, updateDoc, doc, serverTimestamp, getDocs, where } from "firebase/firestore";
+import { db, auth } from "../../firebase";
+import { collection, addDoc, onSnapshot, query, orderBy, updateDoc, doc, serverTimestamp, getDocs, where, deleteDoc, increment } from "firebase/firestore";
 
 // icons (swapped from emoji to project's asset icons)
 import TotalWasteIcon from '../../assets/Waste and Disposal/Total Waste Items.png';
@@ -89,18 +89,21 @@ export const WasteModule = () => {
           if (s.id === 'dummy' || d?.placeholder) return;
           arr.push({ id: s.id, ...d });
         });
-        if (arr.length > 0) {
-          setItems(arr.map(it => ({
-            id: it.id,
-            name: it.name || it.item || '',
-            quantity: String(it.quantity || ''),
-            reason: it.reason || 'Damaged',
-            disposalDate: it.disposalDate || '',
-            valueLost: Number(it.valueLost) || 0,
-            status: it.status || 'Pending Disposal',
-            notes: it.notes || []
-          })));
-        }
+        // Always replace local state with Firestore result. If Firestore returns
+        // zero documents, this ensures we don't keep showing stale localStorage data.
+        const mapped = arr.map(it => ({
+          id: it.id,
+          name: it.name || it.item || '',
+          quantity: String(it.quantity || ''),
+          reason: it.reason || 'Damaged',
+          disposalDate: it.disposalDate || '',
+          valueLost: Number(it.valueLost) || 0,
+          status: it.status || 'Pending Disposal',
+          notes: it.notes || []
+        }));
+        setItems(mapped);
+        // Remove local fallback cache so deleted items don't persist in localStorage
+        try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
       });
       return () => unsub();
     } catch (e) {
@@ -114,11 +117,16 @@ export const WasteModule = () => {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('All items');
   const [openStatusMenu, setOpenStatusMenu] = useState(null);
-  // Notes modal state
+  // Notes modal state (enhanced: subcollection CRUD + read tracking)
   const [notesOpen, setNotesOpen] = useState(false);
   const [notesItemId, setNotesItemId] = useState(null);
   const [notesList, setNotesList] = useState([]);
   const [newNoteText, setNewNoteText] = useState('');
+  const [notesLoading, setNotesLoading] = useState(false);
+  const [editingNoteId, setEditingNoteId] = useState(null);
+  const [editText, setEditText] = useState('');
+  const [isDeleteNoteOpen, setIsDeleteNoteOpen] = useState(false);
+  const [noteToDelete, setNoteToDelete] = useState(null);
 
   const stats = useMemo(() => {
   const total = items.length;
@@ -204,7 +212,7 @@ export const WasteModule = () => {
       disposalDate: form.disposalDate || '',
       valueLost: Number(form.valueLost) || 0,
       status: 'Pending Disposal',
-      notes: form.notes ? [{ text: form.notes, created_at: new Date().toISOString() }] : [],
+      // notes moved to a subcollection after creating the document to match Inventory behavior
       created_at: serverTimestamp()
     };
 
@@ -317,6 +325,25 @@ export const WasteModule = () => {
       const ref = await addDoc(col, finalPayload);
       // Replace the optimistic local id with the server id when available
       setItems(prev => prev.map(it => it.id === localId ? { ...it, id: ref.id } : it));
+
+      // If the user provided initial notes in the add form, persist them into
+      // the notes subcollection (Inventory uses a subcollection). Also increment
+      // parent's unread counter to surface a badge/notification like Inventory.
+      if (form.notes && String(form.notes).trim()) {
+        try {
+          const notePayload = {
+            text: String(form.notes).trim(),
+            created_at: serverTimestamp(),
+            created_by: auth?.currentUser?.uid || null,
+            created_by_name: auth?.currentUser?.displayName || null,
+            read: false
+          };
+          await addDoc(collection(db, 'waste_items', ref.id, 'notes'), notePayload);
+          try { await updateDoc(doc(db, 'waste_items', ref.id), { unread_notes_count: increment(1) }); } catch (e) { /* non-critical */ }
+        } catch (e) {
+          console.warn('Failed to persist initial waste note to subcollection', e);
+        }
+      }
     } catch (err) {
       console.warn('Failed to save waste item to Firestore:', err);
     }
@@ -375,7 +402,7 @@ export const WasteModule = () => {
       </div>
 
       <div className="flex-1 flex flex-col">
-  <AppHeader title="WASTE AND DISPOSAL" subtitle="Track expired, damaged, and disposed inventory items." />
+  <AppHeader title="WASTE AND DISPOSAL" subtitle="Track expired, damaged, and disposed inventory items." searchPlaceholder="Search waste" />
 
         {/* header */}
 
@@ -545,27 +572,49 @@ export const WasteModule = () => {
                               const hasNotes = Array.isArray(it.notes) ? it.notes.length > 0 : (typeof it.notes === 'string' && it.notes.trim());
                               const count = Array.isArray(it.notes) ? it.notes.length : (typeof it.notes === 'string' && it.notes.trim() ? 1 : 0);
                               return (
-                                <button title={hasNotes ? `Notes (${count})` : 'Notes'} onClick={() => {
+                                <button title={hasNotes ? `Notes (${count})` : 'Notes'} onClick={async () => {
                                   // open notes modal for this item
-                                  const item = items.find(x => x.id === it.id);
-                                  let notes = [];
-                                  if (item) {
-                                    if (Array.isArray(item.notes)) notes = item.notes.slice();
-                                    else if (typeof item.notes === 'string' && item.notes.trim()) notes = [{ text: item.notes, created_at: new Date().toISOString() }];
-                                    else notes = [];
-                                  }
-                                  setNotesList(notes);
                                   setNotesItemId(it.id);
                                   setNewNoteText('');
+                                  setEditingNoteId(null);
+                                  setEditText('');
+                                  // If this item is persisted (server id), load its notes subcollection
+                                  const isServerId = it.id && !String(it.id).startsWith('wst-');
+                                  if (isServerId) {
+                                    try {
+                                      setNotesLoading(true);
+                                      const snap = await getDocs(collection(db, 'waste_items', it.id, 'notes'));
+                                      const list = snap.docs.map(d => {
+                                        const data = d.data() || {};
+                                        let when = data.created_at;
+                                        let ts = null;
+                                        if (when) {
+                                          if (typeof when.toDate === 'function') ts = when.toDate();
+                                          else if (when.seconds) ts = new Date(when.seconds * 1000);
+                                          else ts = new Date(when);
+                                        }
+                                        return { id: d.id, text: data.text || '', created_at: ts ? ts.toISOString() : new Date().toISOString(), created_by: data.created_by || null, created_by_name: data.created_by_name || null, read: !!data.read };
+                                      }).sort((a,b) => (b.created_at || '').localeCompare(a.created_at || ''));
+                                      setNotesList(list);
+                                    } catch (e) {
+                                      console.warn('Failed to load waste notes', e);
+                                      // fallback to in-item notes if present
+                                      const item = items.find(x => x.id === it.id) || {};
+                                      const notes = Array.isArray(item.notes) ? item.notes.map(n => ({ text: n.text || n, created_at: n.created_at || new Date().toISOString() })) : (typeof item.notes === 'string' && item.notes ? [{ text: item.notes, created_at: new Date().toISOString() }] : []);
+                                      setNotesList(notes);
+                                    } finally { setNotesLoading(false); }
+                                  } else {
+                                    // optimistic/local-only id: read notes from item.notes
+                                    const item = items.find(x => x.id === it.id) || {};
+                                    const notes = Array.isArray(item.notes) ? item.notes.map(n => ({ text: n.text || n, created_at: n.created_at || new Date().toISOString() })) : (typeof item.notes === 'string' && item.notes ? [{ text: item.notes, created_at: new Date().toISOString() }] : []);
+                                    setNotesList(notes);
+                                  }
                                   setNotesOpen(true);
                                 }} className={`p-2 rounded-md border ${hasNotes ? 'bg-[#E6FFFE] border-teal-200' : 'bg-white hover:bg-gray-50'}`}>
-                                  {hasNotes ? (
-                                    // filled note icon (teal)
-                                    <svg className="w-4 h-4 text-teal-600" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M12 2C6.477 2 2 5.582 2 10c0 2.38 1.28 4.54 3.5 6.02V22l4.08-2.04C11.02 19.38 11.99 19.5 12.99 19.5c5.523 0 10-3.582 10-8.5S17.523 2 12 2z"/></svg>
-                                  ) : (
-                                    // outline note icon
-                                    <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M8 10h8M8 14h6M21 12c0 4.418-4.03 8-9 8s-9-3.582-9-8 4.03-8 9-8 9 3.582 9 8z"></path></svg>
-                                  )}
+                                  {/* unified note icon: same SVG used for both states, color indicates presence */}
+                                  <svg className={hasNotes ? 'w-4 h-4 text-teal-600' : 'w-4 h-4 text-gray-600'} viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M12 2C6.477 2 2 5.582 2 10c0 2.38 1.28 4.54 3.5 6.02V22l4.08-2.04C11.02 19.38 11.99 19.5 12.99 19.5c5.523 0 10-3.582 10-8.5S17.523 2 12 2z"/>
+                                  </svg>
                                 </button>
                               );
                             })()}
@@ -621,46 +670,128 @@ export const WasteModule = () => {
                         if (!notesItemId) return;
                         const text = (newNoteText || '').trim();
                         if (!text) return;
-                        const note = { text, created_at: new Date().toISOString() };
-                        // update items state: append note to item's notes array
-                        setItems(prev => prev.map(it => {
-                          if (it.id !== notesItemId) return it;
-                          const existing = Array.isArray(it.notes) ? it.notes.slice() : (typeof it.notes === 'string' && it.notes ? [{ text: it.notes, created_at: new Date().toISOString() }] : []);
-                          return { ...it, notes: [note, ...existing] };
-                        }));
-                        // reflect in modal list immediately
-                        setNotesList(prev => [note, ...prev]);
+                        const notePayload = { text, created_at: serverTimestamp(), created_by: auth?.currentUser?.uid || null, created_by_name: auth?.currentUser?.displayName || null, read: false };
+                        // Optimistic UI: insert a local note object with temp id
+                        const temp = { id: `local-${Date.now()}`, text, created_at: new Date().toISOString(), created_by: auth?.currentUser?.uid || null, created_by_name: auth?.currentUser?.displayName || null, read: false };
+                        setNotesList(prev => [temp, ...prev]);
                         setNewNoteText('');
 
-                        // Persist to Firestore if this item has a server id (not the optimistic local id)
+                        // Persist to Firestore subcollection and increment parent unread count
                         try {
-                          if (notesItemId && !notesItemId.startsWith('wst-')) {
-                            const item = items.find(x => x.id === notesItemId) || {};
-                            const existing = Array.isArray(item.notes) ? item.notes : (typeof item.notes === 'string' && item.notes ? [{ text: item.notes, created_at: new Date().toISOString() }] : []);
-                            const newNotes = [note, ...existing];
-                            await updateDoc(doc(db, 'waste_items', notesItemId), { notes: newNotes });
+                          if (notesItemId && !String(notesItemId).startsWith('wst-')) {
+                            const ref = await addDoc(collection(db, 'waste_items', notesItemId, 'notes'), notePayload);
+                            // replace temp note id with real id in UI
+                            setNotesList(prev => prev.map(n => n.id === temp.id ? { ...n, id: ref.id, created_at: (new Date()).toISOString() } : n));
+                            try { await updateDoc(doc(db, 'waste_items', notesItemId), { unread_notes_count: increment(1) }); } catch (e) { /* non-critical */ }
+                          } else {
+                            // local-only: update item's notes array as before
+                            setItems(prev => prev.map(it => it.id === notesItemId ? { ...it, notes: [{ text, created_at: new Date().toISOString() }, ...(Array.isArray(it.notes) ? it.notes : [])] } : it));
                           }
                         } catch (err) {
-                          console.warn('Failed to persist note to Firestore', err);
+                          console.warn('Failed to persist waste note', err);
                         }
                       }} className="px-4 py-2 rounded-full bg-[#00B7C2] text-white">Add</button>
                     </div>
 
                     <div className="mt-4 border-t pt-3">
                       <div className="text-sm font-semibold text-gray-700 mb-2">Notes</div>
-                      {notesList.length === 0 ? (
+                      {notesLoading ? (
+                        <div className="text-sm text-gray-400">Loading…</div>
+                      ) : notesList.length === 0 ? (
                         <div className="text-sm text-gray-400">No notes yet.</div>
                       ) : (
                         <div className="space-y-2 max-h-48 overflow-y-auto">
                           {notesList.map((n, idx) => (
-                            <div key={idx} className="p-2 bg-gray-50 border rounded">
-                              <div className="text-sm text-gray-800">{n.text}</div>
-                              <div className="text-xs text-gray-400 mt-1">{new Date(n.created_at).toLocaleString()}</div>
+                            <div key={n.id || idx} className="p-2 bg-gray-50 border rounded">
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <div className="text-sm text-gray-800">{n.text}</div>
+                                  <div className="text-xs text-gray-400 mt-1">{new Date(n.created_at).toLocaleString()}</div>
+                                </div>
+                                <div className="flex flex-col items-end gap-1">
+                                  <div className="text-xs text-gray-500">{n.read ? 'Read' : ''}</div>
+                                  <div className="flex items-center gap-2">
+                                    {!n.read && (
+                                      <button onClick={async () => {
+                                        // mark single note as read (persist)
+                                        try {
+                                          if (notesItemId && !String(notesItemId).startsWith('wst-') && n.id) {
+                                            await updateDoc(doc(db, 'waste_items', notesItemId, 'notes', n.id), { read: true });
+                                            // decrement parent unread counter
+                                            try { await updateDoc(doc(db, 'waste_items', notesItemId), { unread_notes_count: increment(-1) }); } catch (e) {}
+                                            setNotesList(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
+                                          } else {
+                                            // local note: mark read locally
+                                            setNotesList(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
+                                          }
+                                        } catch (e) { console.warn('Failed to mark waste note read', e); }
+                                      }} className="text-xs text-[#00b7c2]">Mark read</button>
+                                    )}
+                                    <button onClick={() => { setEditingNoteId(n.id); setEditText(n.text || ''); }} className="text-xs text-gray-500">Edit</button>
+                                    <button onClick={() => { setIsDeleteNoteOpen(true); setNoteToDelete(n.id); }} className="text-xs text-red-500">Delete</button>
+                                  </div>
+                                </div>
+                              </div>
+                              {editingNoteId === n.id && (
+                                <div className="mt-2">
+                                  <textarea value={editText} onChange={e => setEditText(e.target.value)} className="w-full border border-gray-200 rounded-md px-3 py-2 text-sm" rows={2} />
+                                  <div className="mt-2 flex items-center justify-end gap-2">
+                                    <button onClick={() => { setEditingNoteId(null); setEditText(''); }} className="px-3 py-1 bg-gray-100 rounded">Cancel</button>
+                                    <button onClick={async () => {
+                                      const t = (editText || '').trim();
+                                      if (!t) return;
+                                      try {
+                                        if (notesItemId && !String(notesItemId).startsWith('wst-') && n.id) {
+                                          await updateDoc(doc(db, 'waste_items', notesItemId, 'notes', n.id), { text: t, updated_at: serverTimestamp() });
+                                          setNotesList(prev => prev.map(x => x.id === n.id ? { ...x, text: t } : x));
+                                        } else {
+                                          // local-only: update local notesList and items
+                                          setNotesList(prev => prev.map(x => x.id === n.id ? { ...x, text: t } : x));
+                                          setItems(prev => prev.map(it => it.id === notesItemId ? { ...it, notes: (Array.isArray(it.notes) ? it.notes.map(x => x.id === n.id ? { ...x, text: t } : x) : it.notes) } : it));
+                                        }
+                                      } catch (err) { console.warn('Failed editing waste note', err); }
+                                      setEditingNoteId(null); setEditText('');
+                                    }} className="px-3 py-1 bg-[#00B7C2] text-white rounded">Save</button>
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           ))}
                         </div>
                       )}
                     </div>
+                  </div>
+                </div>
+              </div>
+            )}
+            {/* Delete note confirmation modal */}
+            {isDeleteNoteOpen && (
+              <div className="fixed inset-0 z-60 flex items-center justify-center">
+                <div className="absolute inset-0 bg-black opacity-40" onClick={() => setIsDeleteNoteOpen(false)}></div>
+                <div className="relative bg-white rounded-lg p-6 shadow-lg w-[420px]">
+                  <div className="font-semibold mb-2">Delete note?</div>
+                  <p className="text-sm text-gray-600 mb-4">This will permanently delete the note.</p>
+                  <div className="flex justify-end gap-2">
+                    <button onClick={() => setIsDeleteNoteOpen(false)} className="px-3 py-1 bg-gray-100 rounded">Cancel</button>
+                    <button onClick={async () => {
+                      if (!noteToDelete) { setIsDeleteNoteOpen(false); return; }
+                      try {
+                        if (notesItemId && !String(notesItemId).startsWith('wst-')) {
+                          // check if note exists and whether it was unread to adjust counter
+                          const noteRef = doc(db, 'waste_items', notesItemId, 'notes', noteToDelete);
+                          // best-effort: assume delete will remove unread note; decrement parent unread counter
+                          await deleteDoc(noteRef);
+                          try { await updateDoc(doc(db, 'waste_items', notesItemId), { unread_notes_count: increment(-1) }); } catch (e) {}
+                          setNotesList(prev => prev.filter(n => n.id !== noteToDelete));
+                        } else {
+                          // local note deletion
+                          setNotesList(prev => prev.filter(n => n.id !== noteToDelete));
+                          setItems(prev => prev.map(it => it.id === notesItemId ? { ...it, notes: (Array.isArray(it.notes) ? it.notes.filter(n => n.id !== noteToDelete) : it.notes) } : it));
+                        }
+                      } catch (e) { console.warn('Failed deleting note', e); }
+                      setNoteToDelete(null);
+                      setIsDeleteNoteOpen(false);
+                    }} className="px-3 py-1 bg-red-500 text-white rounded">Delete</button>
                   </div>
                 </div>
               </div>

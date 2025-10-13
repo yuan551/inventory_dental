@@ -595,7 +595,7 @@ export const ReportsModule = () => {
       {/* Main Content with vertical scroll */}
       <div className="flex-1 flex flex-col h-screen overflow-y-auto">
         {/* Header */}
-        <AppHeader title="REPORTS" subtitle="" />
+  <AppHeader title="REPORTS" subtitle="" searchPlaceholder="Search reports" />
 
         {/* Main Content Body */}
         <div className="w-full max-w-[1440px] mx-auto px-8 flex flex-col gap-6">

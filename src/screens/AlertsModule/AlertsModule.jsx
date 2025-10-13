@@ -48,8 +48,8 @@ export const AlertsModule = () => {
     return () => window.removeEventListener('sidebar:toggle', handler);
   }, []);
 
-  // Subscribe to Firestore 'notifications' collection (if present) and merge with stock alerts
-  const { alerts: stockAlerts } = useAlerts();
+  // Subscribe to Firestore 'notifications' collection (if present) and merge with stock/expiry alerts
+  const { stockAlerts, expiryAlerts } = useAlerts();
 
   useEffect(() => {
     let unsub = null;
@@ -102,14 +102,33 @@ export const AlertsModule = () => {
     const stockMapped = (stockAlerts || []).map((s, idx) => ({
       id: `stock-${s.item}-${s.category}-${idx}`,
       type: 'stock',
-      // consult persisted read map if present
       unread: !((readMap && readMap[`stock-${s.item}-${s.category}-${idx}`] && readMap[`stock-${s.item}-${s.category}-${idx}`].unread === false)),
       title: `${s.item} ${s.severity}`,
       message: s.reason,
       datetime: new Date().toISOString(),
-      // map severity to priority: Critical -> high, Low Stock -> medium
       priority: s.severity === 'Critical' ? 'high' : 'medium',
     }));
+
+    // Map expiryAlerts into UI alert shape
+    const expiryMapped = (expiryAlerts || []).map((e, idx) => {
+      // prefer the raw expiration string entered in Inventory (expirationRaw) if available
+      const displayIso = e.expirationRaw ? (() => {
+        try {
+          // try to parse common formats to ISO; if parsing fails, leave as-is (will be formatted later)
+          const d = new Date(e.expirationRaw);
+          return isNaN(d.getTime()) ? e.expirationRaw : d.toISOString();
+        } catch (err) { return e.expirationRaw; }
+      })() : (e.datetime || new Date().toISOString());
+      return ({
+        id: `expiry-${e.id || e.item}-${idx}`,
+        type: 'expiry',
+        unread: !((readMap && readMap[`expiry-${e.id || e.item}-${idx}`] && readMap[`expiry-${e.id || e.item}-${idx}`].unread === false)),
+        title: `${e.item} Expiring Soon`,
+        message: e.reason,
+        datetime: displayIso,
+        priority: 'high',
+      });
+    });
 
     // Combine notifications (server) first then stock alerts so stock shows in Stock tab
     // When merging, also consider persisted reads for server notifications (if any exist in alert_reads)
@@ -118,8 +137,8 @@ export const AlertsModule = () => {
       if (persisted && persisted.unread === false) return { ...n, unread: false };
       return n;
     });
-    setAlerts([...mergedServer, ...stockMapped]);
-  }, [notifList, stockAlerts]);
+  setAlerts([...mergedServer, ...expiryMapped, ...stockMapped]);
+  }, [notifList, stockAlerts, expiryAlerts, readMap]);
 
   const counts = useMemo(() => {
     const total = alerts.length;
@@ -253,7 +272,7 @@ export const AlertsModule = () => {
 
 			{/* Main content - scrollable */}
 			<div className="flex-1 flex flex-col h-screen">
-				<AppHeader title="ALERTS" subtitle="Monitor low stock and expiration alerts" />
+                <AppHeader title="ALERTS" subtitle="Monitor low stock and expiration alerts" searchPlaceholder="Search alerts" />
 				<main
 					className="flex-1 overflow-y-auto p-8"
 					style={{
@@ -378,8 +397,9 @@ export const AlertsModule = () => {
           className="flex items-stretch rounded-2xl border relative"
           style={{
             background: a.unread ? "#fff" : "#F5F5F5",
-            border: `1.5px solid #78ADFD`,
-            borderLeft: a.unread ? `8px solid #78ADFD` : `1.5px solid #C3D6DF`,
+            // softened borders: lower opacity and slightly reduced thickness so outlines are less heavy
+            border: `1px solid rgba(120,173,253,0.18)`,
+            borderLeft: a.unread ? `6px solid rgba(120,173,253,0.32)` : `1px solid rgba(195,214,223,0.16)`,
             minHeight: "80px",
             padding: "20px",
             alignItems: "center",
@@ -392,7 +412,8 @@ export const AlertsModule = () => {
               className="w-10 h-10 rounded-md flex items-center justify-center"
               style={{
                 background: "#F5F8FE",
-                border: `2px solid #78ADFD`,
+                // lighter icon border
+                border: `1px solid rgba(120,173,253,0.25)`,
               }}
             >
               <img
@@ -454,7 +475,7 @@ export const AlertsModule = () => {
       {filteredAlerts
         .filter(a => !deletedIds.includes(a.id))
         .length === 0 && (
-        <div className="bg-white rounded-lg border border-[#78ADFD] p-4 text-center text-[#707070]">No alerts to show.</div>
+        <div className="bg-white rounded-lg p-4 text-center text-[#707070]" style={{ border: '1px solid rgba(120,173,253,0.16)' }}>No alerts to show.</div>
       )}
     </div>
   </div>

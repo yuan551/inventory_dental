@@ -1287,7 +1287,7 @@ export const InventoryModule = () => {
       {/* Main Content */}
       <div className="flex-1 flex flex-col">
         {/* Header */}
-        <AppHeader title="INVENTORY" subtitle="Manage your dental supplies and item inventory" />
+  <AppHeader title="INVENTORY" subtitle="Manage your dental supplies and item inventory" searchPlaceholder="Search items" />
 
           {/* Action Buttons */}
           <div className="px-8 py-4 flex justify-end gap-4 relative">
