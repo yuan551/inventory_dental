@@ -1,7 +1,9 @@
-import React, { StrictMode } from "react";
+import React, { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { createBrowserRouter, RouterProvider, Outlet, useNavigation, useLocation } from "react-router-dom";
 import LoadingOverlay from "./components/LoadingOverlay";
+import ErrorBoundary from "./components/ErrorBoundary";
+import { getPortalRoot } from "./lib/portal";
 import { LoginModule } from "./screens/LoginModule/LoginModule";
 import { RegisterModule } from "./screens/RegisterModule/RegisterModule";
 import { DashboardModule } from "./screens/DashboardModule/DashboardModule";
@@ -19,6 +21,11 @@ import { ReportsModule } from "./screens/ReportsModule/ReportsModule";
 const RootLayout = () => {
   const nav = useNavigation();
   const location = useLocation();
+
+  // Initialize portal root on mount
+  useEffect(() => {
+    getPortalRoot();
+  }, []);
   // If the router provides a navigation state (data-router), prefer it
   const navLoading = nav && (nav.state === 'loading' || nav.state === 'submitting');
 
@@ -94,6 +101,8 @@ const router = createBrowserRouter([
 
 createRoot(document.getElementById("app")).render(
   <StrictMode>
-    <RouterProvider router={router} />
+    <ErrorBoundary>
+      <RouterProvider router={router} />
+    </ErrorBoundary>
   </StrictMode>,
 );
