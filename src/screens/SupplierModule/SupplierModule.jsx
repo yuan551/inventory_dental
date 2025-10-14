@@ -32,6 +32,28 @@ export const SupplierModule = () => {
   });
 
   const [orders, setOrders] = useState([]);
+  const [inventoryMap, setInventoryMap] = useState({});
+
+  // Map supplier name (lowercased) -> latest order Date
+  const supplierLastOrderMap = React.useMemo(() => {
+    const map = {};
+    for (const o of orders) {
+      try {
+        const sup = (o.supplier || '').toString().trim().toLowerCase();
+        if (!sup) continue;
+        const d = o.created_at instanceof Date ? o.created_at : new Date(o.created_at);
+        if (!d || isNaN(d.getTime())) continue;
+        if (!map[sup] || d > map[sup]) map[sup] = d;
+      } catch (e) { /* ignore malformed order */ }
+    }
+    // format to string
+    const formatted = {};
+    Object.keys(map).forEach(k => {
+      const dt = map[k];
+      try { formatted[k] = dt.toLocaleDateString('en-CA'); } catch { formatted[k] = '' }
+    });
+    return formatted;
+  }, [orders]);
 
   useEffect(() => {
     // Only update orders when we receive a server snapshot (ignore cached snapshots)
@@ -58,7 +80,40 @@ export const SupplierModule = () => {
                 status: data.status || "",
                 expiration: data.expiration || data.expiration_date || "—",
                 category: data.category || "",
-                dateDelivered: data.dateDelivered || "",
+                dateDelivered: (() => {
+                  // Accept multiple possible field names from different payload shapes
+                  const candidates = [
+                    data.dateDelivered,
+                    data.date_delivered,
+                    data.dateDeliveredValue,
+                    data.date_delivered_value,
+                    data.date_delivered_timestamp,
+                    data.dateDeliveredTimestamp,
+                  ];
+                  let found = null;
+                  for (const c of candidates) {
+                    if (c === undefined || c === null || c === "") continue;
+                    found = c;
+                    break;
+                  }
+                  // If no explicit delivered date, try dateDelivered string from other keys
+                  if (!found && data.date_delivered_text) found = data.date_delivered_text;
+                  // If still none, fallback to created_at (may represent delivery in some workflows)
+                  if (!found && data.created_at) found = data.created_at;
+
+                  if (!found) return "";
+                  try {
+                    const dt = found.toDate ? found.toDate() : new Date(found);
+                    if (!dt || isNaN(dt.getTime())) return "";
+                    return dt.toLocaleDateString("en-CA");
+                  } catch (e) {
+                    // last resort: if it's already a string, return as-is
+                    try {
+                      if (typeof found === "string") return new Date(found).toLocaleDateString("en-CA");
+                    } catch (ee) {}
+                    return "";
+                  }
+                })(),
                 created_at: data.created_at
                   ? data.created_at.toDate
                     ? data.created_at.toDate()
@@ -110,6 +165,48 @@ export const SupplierModule = () => {
       }
     );
     return () => unsubSuppliers();
+  }, []);
+
+  // Load inventory items (consumables, medicines, equipment) to enrich Purchase Orders
+  useEffect(() => {
+    let mounted = true;
+    const loadInventory = async () => {
+      try {
+        const cols = ["consumables", "medicines", "equipment"];
+        const map = {};
+        for (const col of cols) {
+          try {
+            const snap = await getDocs(collection(db, col));
+            for (const d of snap.docs) {
+              const data = d.data() || {};
+              const name = (data.item_name || data.item || data.name || "").toString().trim().toLowerCase();
+              if (!name) continue;
+              const rawCost = data.unit_cost ?? data.unitCost ?? data.price ?? data.unitPrice ?? 0;
+              const costNum = typeof rawCost === 'number' ? rawCost : Number(String(rawCost).replace(/[^0-9.\-]/g, '')) || 0;
+              const unitCostStr = `₱${Number(costNum).toFixed(2)}`;
+              let expirationStr = "";
+              const rawExp = data.expiration || data.expiration_date || data.expirationDate;
+              if (rawExp) {
+                try {
+                  if (typeof rawExp === 'string') expirationStr = rawExp;
+                  else if (rawExp.toDate) expirationStr = rawExp.toDate().toLocaleDateString('en-US');
+                  else if (rawExp.seconds) expirationStr = new Date(rawExp.seconds * 1000).toLocaleDateString('en-US');
+                  else expirationStr = new Date(rawExp).toLocaleDateString('en-US');
+                } catch (e) { expirationStr = '' }
+              }
+              if (!map[name]) map[name] = { unitCost: unitCostStr, expiration: expirationStr, _id: d.id, category: col };
+            }
+          } catch (e) {
+            console.warn('Failed to load inventory collection', col, e);
+          }
+        }
+        if (mounted) setInventoryMap(map);
+      } catch (e) {
+        console.error('Failed to load inventory for supplier module', e);
+      }
+    };
+    loadInventory();
+    return () => { mounted = false; };
   }, []);
 
   const [activeTab, setActiveTab] = useState("directory");
@@ -233,6 +330,25 @@ export const SupplierModule = () => {
     });
     setShowForm(false);
     setShowSuccessModal(true);
+  };
+
+  // Toggle supplier Active/Inactive status (optimistic UI + persist)
+  const toggleSupplierStatus = async (index) => {
+    try {
+      const s = suppliers[index];
+      if (!s || !s.id) return;
+      const nextStatus = s.status === 'Active' ? 'Inactive' : 'Active';
+      // optimistic update
+      const copy = [...suppliers];
+      copy[index] = { ...copy[index], status: nextStatus };
+      setSuppliers(copy);
+      // persist
+      await updateDoc(doc(db, 'suppliers', s.id), { status: nextStatus });
+    } catch (e) {
+      console.error('Failed to toggle supplier status', e);
+      // revert on error: refetch suppliers snapshot will correct it, but revert locally for UX
+      setSuppliers((prev) => prev.map((p, i) => i === index ? { ...p, status: (p.status === 'Active' ? 'Inactive' : 'Active') } : p));
+    }
   };
 
   return (
@@ -1072,22 +1188,24 @@ export const SupplierModule = () => {
                               {supplierTotalQuantities[s.name] || 0}
                             </td>
                             <td className="py-4 pr-4 align-top">
-                              {s.lastOrder
-                                ? new Date(s.lastOrder).toLocaleDateString(
-                                    "en-US"
-                                  )
-                                : ""}
+                              {(() => {
+                                const key = (s.name || "").toString().trim().toLowerCase();
+                                const v = supplierLastOrderMap[key];
+                                if (v) return v; // already formatted en-CA
+                                if (s.lastOrder) {
+                                  try { return new Date(s.lastOrder).toLocaleDateString('en-US'); } catch { return '' }
+                                }
+                                return "";
+                              })()}
                             </td>
                             <td className="py-4 pr-4 align-top">
-                              {s.status === "Active" ? (
-                                <span className="inline-block px-3 py-1 text-xs rounded-full bg-green-100 text-green-700 font-semibold">
-                                  Active
-                                </span>
-                              ) : (
-                                <span className="inline-block px-3 py-1 text-xs rounded-full bg-gray-200 text-gray-600 font-semibold">
-                                  Inactive
-                                </span>
-                              )}
+                              <button
+                                onClick={() => toggleSupplierStatus(idx)}
+                                className={`inline-block px-3 py-1 text-xs rounded-full font-semibold transition ${s.status === 'Active' ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}
+                                aria-label={`Toggle status for ${s.name}`}
+                              >
+                                {s.status === 'Active' ? 'Active' : 'Inactive'}
+                              </button>
                             </td>
                             <td className="py-4 align-top">
                               <button
@@ -1170,21 +1288,32 @@ export const SupplierModule = () => {
                               <td className="px-6 py-6 align-top">
                                 {order.supplier}
                               </td>
-                              <td className="px-6 py-6 align-top">{"—"}</td>
+                              <td className="px-6 py-6 align-top">
+                                {(() => {
+                                  const key = (order.item || '').toString().trim().toLowerCase();
+                                  const inv = inventoryMap[key];
+                                  if (inv && inv.unitCost) return inv.unitCost;
+                                  if (order.unitCost && order.unitCost !== "") return order.unitCost;
+                                  return "—";
+                                })()}
+                              </td>
                               <td className="px-6 py-6 align-top">
                                 {order.status}
                               </td>
                               <td className="px-6 py-6 align-top">
-                                {order.expiration}
+                                {(() => {
+                                  // try inventory lookup by item name
+                                  const key = (order.item || '').toString().trim().toLowerCase();
+                                  const inv = inventoryMap[key];
+                                  if (inv && inv.expiration) return inv.expiration;
+                                  return order.expiration || '—';
+                                })()}
                               </td>
                               <td className="px-6 py-6 align-top capitalize">
                                 {order.category}
                               </td>
                               <td className="px-6 py-6 align-top">
-                                {order.dateDelivered &&
-                                order.dateDelivered !== ""
-                                  ? order.dateDelivered
-                                  : "—"}
+                                {order.dateDelivered && order.dateDelivered !== "" ? order.dateDelivered : '—'}
                               </td>
                             </tr>
                           ))}
