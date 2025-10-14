@@ -39,9 +39,7 @@ export const SupplierModule = () => {
       collection(db, "ordered"),
       { includeMetadataChanges: true },
       (snap) => {
-        // Accept cache snapshots immediately so the UI can show data while a
-        // server snapshot is pending. Server snapshots will overwrite this
-        // state when they arrive (onSnapshot will run again).
+        if (snap.metadata && snap.metadata.fromCache) return; // ignore local cache updates
         setOrders(
           snap.docs
             .filter((doc) => doc.id !== 'dont delete') // hide placeholder/dummy doc from UI
@@ -80,9 +78,7 @@ export const SupplierModule = () => {
       collection(db, "suppliers"),
       { includeMetadataChanges: true },
       (snap) => {
-        // Accept cache snapshots immediately so the UI can show data while a
-        // server snapshot is pending. Server snapshots will overwrite this
-        // state when they arrive (onSnapshot will run again).
+        if (snap.metadata && snap.metadata.fromCache) return; // ignore local cache updates
         setSuppliers(
           snap.docs
             .filter((d) => {

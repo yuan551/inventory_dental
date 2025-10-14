@@ -1,5 +1,5 @@
 import { Bell as BellIcon, Search as SearchIcon, Filter as FilterIcon, Package as PackageIcon, X as XIcon, Calendar as CalendarIcon, ChevronDown as ChevronDownIcon, Check as CheckIcon, Plus as PlusIcon, Minus as MinusIcon, Pencil as PencilIcon, Trash as TrashIcon } from "lucide-react";
-import { collection, addDoc, getDocs, serverTimestamp, doc, writeBatch, updateDoc, deleteDoc, increment, Timestamp, getDoc, getCountFromServer } from "firebase/firestore";
+import { collection, addDoc, getDocs, serverTimestamp, doc, writeBatch, updateDoc, deleteDoc, increment, Timestamp, getDoc } from "firebase/firestore";
 import { isPlaceholderDoc } from "../../lib/placeholders";
 import { db, auth } from "../../firebase";
 import React, { useEffect, useState, useRef } from "react";
@@ -136,9 +136,6 @@ export const InventoryModule = () => {
     equipment: [],
   };
   const [dataMap, setDataMap] = useState(initialData);
-  // Keep fast collection counts per tab so we can avoid a full getDocs if cache already matches the server
-  // Use null to indicate 'unknown' until we've fetched the count from the server.
-  const [collectionCounts, setCollectionCounts] = useState({ consumables: null, medicines: null, equipment: null });
 
   const statusStyleMap = {
     Critical: "bg-red-100 text-red-800 hover:bg-red-50 transition-colors",
@@ -162,6 +159,19 @@ export const InventoryModule = () => {
   const displayRows = baseRows
     .map((r, i) => ({ ...r, _sourceIndex: i }))
     .filter((r) => (statusFilter === 'All Status' ? true : r.status === statusFilter));
+
+  // Memoized count for the header: count actual Firestore docs in the current tab's collection
+  const [tabCount, setTabCount] = useState(0);
+  useEffect(() => {
+    async function fetchCount() {
+      const norm = normalizeCategory(activeTab);
+      const snap = await getDocs(collection(db, norm));
+      // Only count non-placeholder docs
+      const count = snap.docs.filter(d => !isPlaceholderDoc(d.id, d.data())).length;
+      setTabCount(count);
+    }
+    fetchCount();
+  }, [activeTab]);
 
   // Map Firestore doc to table row
   const mapDocToRow = (d) => {
@@ -194,10 +204,7 @@ export const InventoryModule = () => {
 
   // Per-tab cache helpers to minimize reads
   const getCacheKey = (tab) => `${tab}_cache_v1`;
-  // Increase TTL to 5 minutes to reduce repeated network fetches when users
-  // navigate between tabs quickly. Prefetching also helps reduce perceived
-  // latency when switching tabs.
-  const TTL_MS = 5 * 60 * 1000; // 5 minutes TTL
+  const TTL_MS = 60 * 1000; // 60s TTL; adjust if needed
   const tryLoadCache = (tab) => {
     try {
       const raw = sessionStorage.getItem(getCacheKey(tab));
@@ -212,24 +219,12 @@ export const InventoryModule = () => {
   };
   const fetchTabIfNeeded = async (tab) => {
     const cached = tryLoadCache(tab);
-    const norm = normalizeCategory(tab);
-    try {
-      // Query the server for a lightweight count first. If cache length matches
-      // the server-side collection count, skip downloading full documents.
-      const aggSnap = await getCountFromServer(collection(db, norm));
-      const serverCount = Number(aggSnap.data()?.count ?? 0);
-      // update our count map so UI can show quick totals
-      setCollectionCounts((prev) => ({ ...prev, [tab]: serverCount }));
-      if (cached && Array.isArray(cached) && cached.length === serverCount) {
-        setDataMap((prev) => ({ ...prev, [tab]: cached }));
-        return;
-      }
-    } catch (e) {
-      // If counting failed (network/offline), fall back to cached behavior
-      // and continue to try fetching documents below.
-      console.warn('Failed to fetch collection count for', norm, e);
+    if (cached) {
+      setDataMap((prev) => ({ ...prev, [tab]: cached }));
+      setTabCount(cached.length);
+      return;
     }
-
+    const norm = normalizeCategory(tab);
     let snap = await getDocs(collection(db, norm));
     // Fallback: if empty and norm differs from original or common variant, check variants
     if (snap.empty) {
@@ -244,42 +239,8 @@ export const InventoryModule = () => {
     }
     const rows = snap.docs.filter(d => !isPlaceholderDoc(d.id, d.data())).map(mapDocToRow);
     setDataMap((prev) => ({ ...prev, [tab]: rows }));
+    setTabCount(rows.length);
     saveCache(tab, rows);
-    // If we just fetched full docs, reconcile the collection count
-    try { setCollectionCounts((prev) => ({ ...prev, [tab]: rows.length })); } catch {}
-  };
-
-  // Lightweight: fetch only the server-side count for a collection when possible
-  const fetchCountIfPossible = async (tab) => {
-    try {
-      const norm = normalizeCategory(tab);
-      let aggSnap = await getCountFromServer(collection(db, norm));
-      let serverCount = Number(aggSnap.data()?.count ?? 0);
-      // If server returned zero, try common collection name variants (like in fetchTabIfNeeded)
-      if (serverCount === 0) {
-        const variants = new Set([tab, norm]);
-        if (norm === 'medicines') variants.add('medicine');
-        if (norm === 'equipment') variants.add('equipments');
-        for (const v of variants) {
-          if (v === norm) continue;
-          try {
-            const s2 = await getCountFromServer(collection(db, v));
-            const c2 = Number(s2.data()?.count ?? 0);
-            if (c2 > 0) { serverCount = c2; break; }
-          } catch (e2) { /* ignore */ }
-        }
-      }
-      // If we still have zero but cache contains rows, prefer cache length to avoid showing 0 when we have data locally
-      const cached = tryLoadCache(tab);
-      if ((serverCount === 0 || serverCount === null) && Array.isArray(cached) && cached.length > 0) {
-        serverCount = cached.length;
-      }
-      setCollectionCounts((prev) => ({ ...prev, [tab]: serverCount }));
-      return serverCount;
-    } catch (e) {
-      // ignore errors (offline/permissions), leave count as null
-      return null;
-    }
   };
 
   // Force refetch (skip cache) for a category
@@ -301,7 +262,6 @@ export const InventoryModule = () => {
       setDataMap((prev) => ({ ...prev, [tab]: rows }));
       // Update cache with fresh data
       saveCache(tab, rows);
-      try { setCollectionCounts((prev) => ({ ...prev, [tab]: rows.length })); } catch {}
     } catch (e) { console.error('Failed to force refetch for', tab, e); }
   };
 
@@ -780,21 +740,8 @@ export const InventoryModule = () => {
   const todayStr = new Date().toLocaleDateString("en-US");
   // Initial fetch for default tab
   useEffect(() => { fetchTabIfNeeded('consumables'); }, []);
-  // Prefetch other inventory tabs in the background with a small stagger to
-  // avoid bursting multiple reads at exactly the same moment.
-  useEffect(() => {
-    const timers = [];
-    try {
-      // medicines after 300ms, equipment after 700ms
-      timers.push(setTimeout(() => { fetchCountIfPossible('medicines'); fetchTabIfNeeded('medicines'); }, 300));
-      timers.push(setTimeout(() => { fetchCountIfPossible('equipment'); fetchTabIfNeeded('equipment'); }, 700));
-    } catch (e) {
-      console.warn('Prefetch failed', e);
-    }
-    return () => timers.forEach(t => clearTimeout(t));
-  }, []);
   // Fetch on tab change if needed
-  useEffect(() => { if (activeTab !== 'consumables') { fetchCountIfPossible(activeTab); fetchTabIfNeeded(activeTab); } }, [activeTab]);
+  useEffect(() => { if (activeTab !== 'consumables') fetchTabIfNeeded(activeTab); }, [activeTab]);
 
   // Listen for inventory refresh events triggered after an order is marked Received
   useEffect(() => {
@@ -808,21 +755,6 @@ export const InventoryModule = () => {
     window.addEventListener('inventory:refresh', handler);
     return () => window.removeEventListener('inventory:refresh', handler);
   }, []);
-
-  // Count of items in the active collection (based on Firestore collection / cache)
-  const collectionCount = (() => {
-    try {
-      // If server count is known (not null), prefer it as the authoritative total
-      const serverVal = collectionCounts ? collectionCounts[activeTab] : null;
-      if (serverVal !== null && serverVal !== undefined) return Number(serverVal);
-      // otherwise fall back to in-memory rows or cache
-      const rows = dataMap[activeTab];
-      if (Array.isArray(rows) && rows.length >= 0) return rows.length;
-      const cached = tryLoadCache(activeTab);
-      if (Array.isArray(cached)) return cached.length;
-      return 0;
-    } catch (e) { return 0; }
-  })();
 
   const [isSaving, setIsSaving] = useState(false);
   const [editValidationErrors, setEditValidationErrors] = useState([]); // [{id, message}]
@@ -1454,24 +1386,7 @@ export const InventoryModule = () => {
 
           {/* Main Content Card */}
           <div className="bg-white rounded-2xl shadow-[0_20px_40px_rgba(0,0,0,0.08)] border border-gray-200 p-6 flex flex-col min-h-[440px] max-h-[calc(100vh-300px)]">
-            {/* Overview Header */}
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="[font-family:'Inter',Helvetica] font-semibold text-xl text-gray-900">
-                {collectionCounts && collectionCounts[activeTab] != null ? (
-                  <>OVERVIEW ({displayRows.length} shown of {collectionCounts[activeTab]} total)</>
-                ) : (
-                  <>OVERVIEW ({displayRows.length} {displayRows.length === 1 ? 'item' : 'items'})</>
-                )}
-              </h2>
-              {selectMode && (
-                <div>
-                  <div className="flex items-center gap-2">
-                    <Button onClick={handleToggleSelect} className="px-4 py-2 rounded-full bg-[#00b7c2] hover:bg-[#009ba5] text-white [font-family:'Oxygen',Helvetica] font-semibold text-sm">Unselect</Button>
-                    <Button onClick={handleSelectAll} className="px-4 py-2 rounded-full bg-[#00b7c2] hover:bg-[#009ba5] text-white [font-family:'Oxygen',Helvetica] font-semibold text-sm">Select All</Button>
-                  </div>
-                </div>
-              )}
-            </div>
+            {/* Overview header removed per user request */}
 
             {/* Inventory Table */}
             {editValidationErrors && editValidationErrors.length > 0 && (

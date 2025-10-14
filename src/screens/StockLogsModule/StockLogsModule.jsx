@@ -85,6 +85,9 @@ export const StockLogsModule = () => {
     const [logs, setLogs] = useState([]);
     const [stockInLogs, setStockInLogs] = useState([]);
     const [outLogs, setOutLogs] = useState([]);
+    const [logsLoaded, setLogsLoaded] = useState(false);
+    const [stockInLoaded, setStockInLoaded] = useState(false);
+    const [outLogsLoaded, setOutLogsLoaded] = useState(false);
     const [accountsMap, setAccountsMap] = useState({});
     const [openStatusFor, setOpenStatusFor] = useState(null);
     const [dropdownStyle, setDropdownStyle] = useState(null);
@@ -159,6 +162,21 @@ export const StockLogsModule = () => {
         return () => window.removeEventListener("sidebar:toggle", handler);
     }, []);
 
+    // Helper: return count for Transaction Tracker header based on active tab/subTab
+    // NOTE: do NOT reference `filteredLogs` here because it's declared later and
+    // may be uninitialized during the initial render (can trigger TDZ errors).
+    const getTrackerCount = () => {
+        if (tab === 'in') {
+            if (subTab === 'ordered') return (logs || []).length;
+            if (subTab === 'stockin') return (stockInLogs || []).length;
+            // ordered + stockin
+            return (logs || []).length + (stockInLogs || []).length;
+        }
+        if (tab === 'out') return (outLogs || []).length;
+        // default: sum of all known lists
+        return (logs || []).length + (stockInLogs || []).length + (outLogs || []).length;
+    };
+
     // Load accounts map
     useEffect(() => {
         const accountsCol = collection(db, "accounts");
@@ -197,6 +215,7 @@ export const StockLogsModule = () => {
                 }
             });
             setLogs(arr);
+            setLogsLoaded(true);
         });
         return () => unsubscribe();
     }, []);
@@ -214,6 +233,7 @@ export const StockLogsModule = () => {
                 }
             });
             setStockInLogs(arr);
+            setStockInLoaded(true);
         });
         return () => unsub();
     }, []);
@@ -234,6 +254,7 @@ export const StockLogsModule = () => {
                 }
             });
             setOutLogs(arr);
+            setOutLogsLoaded(true);
         });
         return () => unsubscribe();
     }, []);
@@ -686,8 +707,20 @@ export const StockLogsModule = () => {
                     <div className="flex flex-col md:flex-row md:items-start md:justify-between mb-4 md:mb-6 gap-4">
                         <div className="flex flex-col gap-2 font-sans">
                             <div className="font-semibold text-gray-900 text-lg md:text-xl">
-                                Transaction Tracker ({filteredLogs.length} items)
+                                {(() => {
+                                    const label = (() => {
+                                        if (tab === 'in') {
+                                            if (subTab === 'ordered') return logsLoaded ? `${logs.length} items` : 'Loading...';
+                                            if (subTab === 'stockin') return stockInLoaded ? `${stockInLogs.length} items` : 'Loading...';
+                                            return (logsLoaded && stockInLoaded) ? `${logs.length + stockInLogs.length} items` : 'Loading...';
+                                        }
+                                        if (tab === 'out') return outLogsLoaded ? `${outLogs.length} items` : 'Loading...';
+                                        return (logsLoaded || stockInLoaded || outLogsLoaded) ? `${logs.length + stockInLogs.length + outLogs.length} items` : 'Loading...';
+                                    })();
+                                    return `Transaction Tracker (${label})`;
+                                })()}
                             </div>
+                            {/* debug removed */}
                             {tab === 'in' && (
                                     <div className="flex gap-2">
                                         <button
@@ -775,8 +808,8 @@ export const StockLogsModule = () => {
                         </div>
                     </div>
 
-                    {/* Table */}
-                    <div className="overflow-x-auto" style={{ maxHeight: tableMaxHeight, overflowY: 'auto', scrollbarWidth: 'thin', scrollbarColor: '#00B6C9 #f0f0f0' }}>
+                    {/* Table - scroll only this container (force inner scroll) */}
+                    <div className="overflow-x-auto overflow-y-scroll" style={{ maxHeight: Math.min(tableMaxHeight || 520, 720), scrollbarWidth: 'thin', scrollbarColor: '#00B6C9 #f0f0f0' }}>
                         <table className="min-w-full text-sm text-left font-sans">
                             <thead ref={tableHeadRef} className="bg-[#F7F7F7] sticky top-0 z-10">
                                 <tr className="text-gray-400 text-base font-semibold">
