@@ -772,6 +772,7 @@ export const SupplierModule = () => {
                   try {
                     const supplierId = editForm.id;
                     if (supplierId) {
+                      // update supplier doc
                       await updateDoc(doc(db, 'suppliers', supplierId), {
                         supplier: editForm.name,
                         contact_person: editForm.contactName,
@@ -782,13 +783,45 @@ export const SupplierModule = () => {
                         rating: editForm.rating,
                         status: editForm.status || 'Inactive',
                       });
+
+                      // If the supplier name changed, migrate any existing 'ordered' docs
+                      // that still reference the old supplier name to the new name so
+                      // the total/order associations remain intact.
+                      const oldName = (editForm.originalName || '').toString().trim();
+                      const newName = (editForm.name || '').toString().trim();
+                      if (oldName && newName && oldName !== newName) {
+                        try {
+                          // find ordered documents that reference the old supplier name
+                          const qSnap = await getDocs(collection(db, 'ordered'));
+                          const updates = [];
+                          qSnap.forEach((d) => {
+                            const data = d.data() || {};
+                            const sup = (data.supplierValue || data.supplier || '').toString().trim();
+                            if (sup && sup.toLowerCase() === oldName.toLowerCase()) {
+                              // update this ordered doc's supplier fields
+                              updates.push(
+                                updateDoc(doc(db, 'ordered', d.id), {
+                                  supplier: newName,
+                                  supplierValue: newName,
+                                })
+                              );
+                            }
+                          });
+                          // run updates in parallel
+                          await Promise.all(updates);
+                        } catch (migrateErr) {
+                          console.error('Failed to migrate ordered docs for renamed supplier', migrateErr);
+                        }
+                      }
                     }
                   } catch (err) {
                     console.error('Failed to update supplier', err);
                   }
                   const updatedSuppliers = [...suppliers];
                   updatedSuppliers[editForm.index] = { ...editForm };
+                  // remove transient editing fields before setting local state
                   delete updatedSuppliers[editForm.index].index;
+                  delete updatedSuppliers[editForm.index].originalName;
                   setSuppliers(updatedSuppliers);
                   setShowEditModal(false);
                 }}
@@ -1214,6 +1247,8 @@ export const SupplierModule = () => {
                                   setEditForm({
                                     ...suppliers[idx],
                                     index: idx,
+                                    // keep the original name so we can migrate orders if user renames
+                                    originalName: suppliers[idx].name,
                                   });
                                   setShowEditModal(true);
                                 }}
