@@ -217,13 +217,17 @@ export const DashboardModule = () => {
       const cached = tryLoad();
       if (cached) { setTrendMonths(cached.months); setTrendSeries(cached.series); return; }
 
-      // Dynamic window: last 12 months (oldest -> newest)
+      // Fixed window: June -> December of the most relevant year
+      // If current month is June or later, show Jun..Dec of current year.
+      // Otherwise show Jun..Dec of previous year.
       const now = new Date();
+      const startMonth = 5; // June (0-based)
+      const endMonth = 11;  // December
+      const year = now.getMonth() >= startMonth ? now.getFullYear() : now.getFullYear() - 1;
       const months = [];
       const labels = [];
-      const N = 12; // months to show
-      for (let i = N - 1; i >= 0; i--) {
-        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      for (let m = startMonth; m <= endMonth; m++) {
+        const d = new Date(year, m, 1);
         months.push({ y: d.getFullYear(), m: d.getMonth() });
         labels.push(d.toLocaleString(undefined, { month: 'short' }));
       }
@@ -238,10 +242,10 @@ export const DashboardModule = () => {
         // primary detection: type === 'stock_out'
         let stockOut = logs.filter((l) => (l.type === 'stock_out'));
         // if none found, attempt to detect alternative type labels (stockout, out, stock-out, etc.)
-        const allTypeValues = Array.from(new Set(logs.map(l => (l.type || '').toString().trim().toLowerCase()).filter(Boolean)));
+        const allTypeValues = Array.from(new Set(logs.map(l => (l.type || l.transaction || l.direction || '').toString().trim().toLowerCase()).filter(Boolean)));
         if ((!stockOut || stockOut.length === 0) && allTypeValues.length > 0) {
-          // include any doc whose type contains 'out'
-          const alt = logs.filter(l => (l.type || '').toString().toLowerCase().includes('out'));
+          // include any doc whose type/transaction/direction contains 'out'
+          const alt = logs.filter(l => ((l.type || l.transaction || l.direction) || '').toString().toLowerCase().includes('out'));
           if (alt && alt.length > 0) stockOut = alt;
         }
         // final fallback: if there are logs but none matched as 'stock_out', treat any log with a positive numeric quantity
@@ -257,11 +261,26 @@ export const DashboardModule = () => {
         }
         // diagnostics removed: keep trend computation only
         const parseTs = (t) => {
+          // Accept multiple possible timestamp fields/representations
           if (!t) return null;
-          if (typeof t.toDate === 'function') return t.toDate();
-          if (t.seconds) return new Date(t.seconds * 1000);
-          const d = new Date(t);
-          return isNaN(d.getTime()) ? null : d;
+          try {
+            // If passed an object (like Firestore Timestamp or doc data)
+            if (typeof t === 'object') {
+              if (typeof t.toDate === 'function') return t.toDate();
+              if (typeof t.seconds === 'number') return new Date(t.seconds * 1000);
+              // If object has nested timestamp fields, attempt common names
+              if (t.timestamp && typeof t.timestamp.toDate === 'function') return t.timestamp.toDate();
+              if (t.created_at && typeof t.created_at.toDate === 'function') return t.created_at.toDate();
+              if (t.createdAt && typeof t.createdAt.toDate === 'function') return t.createdAt.toDate();
+              if (t.created_at && typeof t.created_at.seconds === 'number') return new Date(t.created_at.seconds * 1000);
+              if (t.createdAt && typeof t.createdAt.seconds === 'number') return new Date(t.createdAt.seconds * 1000);
+              // If it's a plain object with numeric epoch ms
+              if (typeof t.ms === 'number') return new Date(t.ms);
+            }
+            // If it's a primitive (string or number), try to create Date
+            const d = new Date(t);
+            return isNaN(d.getTime()) ? null : d;
+          } catch (e) { return null; }
         };
 
         const buckets = {
@@ -282,8 +301,8 @@ export const DashboardModule = () => {
           const dt = parseTs(l.timestamp);
           if (!dt || dt < start || dt >= end) return;
           const idx = (dt.getFullYear() - months[0].y) * 12 + (dt.getMonth() - months[0].m);
-          if (idx < 0 || idx >= 6) return;
-          const qty = Number(l.quantity || 0);
+          if (idx < 0 || idx >= labels.length) return;
+          const qty = Number(l.quantity ?? l.qty ?? 0);
           // support variants where category may be stored in category | type | kind
           const rawCat = l.category || l.type || l.kind || '';
           const cat = normalizeCat(rawCat);
@@ -326,6 +345,7 @@ export const DashboardModule = () => {
   }, []);
 
   const lastName = useLastName();
+  
 
   const subtitle = lastName
     ? `Welcome back, Dr. ${lastName}. Here's your clinic's inventory overview.`
@@ -360,7 +380,6 @@ export const DashboardModule = () => {
                 <div className="flex-1 min-h-0">
                   <div className="relative">
                     <MonthlyUsageTrendSection series={trendSeries} months={trendMonths} />
-                    {/* debug UI removed */}
                   </div>
                 </div>
               </CardContent>

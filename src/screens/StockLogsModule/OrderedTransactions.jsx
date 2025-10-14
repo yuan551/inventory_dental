@@ -29,7 +29,7 @@ export const OrderedTransactions = () => {
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <div className="font-semibold text-gray-900 text-lg md:text-xl">Transaction Tracker ({filtered.length} items)</div>
+        <div className="font-semibold text-gray-900 text-lg md:text-xl">Transaction Tracker ({rows.length} items)</div>
         <div className="flex items-center gap-3">
           <input
             value={search}

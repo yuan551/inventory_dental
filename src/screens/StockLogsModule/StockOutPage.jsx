@@ -99,7 +99,7 @@ export const StockOutPage = () => {
   <AppHeader title="STOCK OUT" subtitle="All stock out transactions from Inventory" searchPlaceholder="Search stock out" />
 
         <div className="bg-white rounded-2xl shadow border border-gray-200 p-4 md:p-6 mt-6 mx-2 md:mx-8">
-          <div className="font-semibold text-gray-900 text-lg md:text-xl mb-4">Transaction Tracker ({filtered.length} items)</div>
+          <div className="font-semibold text-gray-900 text-lg md:text-xl mb-4">Transaction Tracker ({rows.length} items)</div>
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
               <thead className="bg-gray-50 text-gray-500">

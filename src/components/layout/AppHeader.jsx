@@ -325,10 +325,10 @@ export const AppHeader = ({ title, subtitle, searchPlaceholder = "Search invento
             </div>
             <div className="text-left">
               <div className="[font-family:'Inter',Helvetica] font-semibold text-gray-900 text-sm tracking-[0] leading-[normal]">
-                {lastName ? `Dr. ${lastName}` : 'User'}
+                {lastName ? `Dr. ${lastName}` : ''}
               </div>
               <div className="[font-family:'Oxygen',Helvetica] font-normal text-gray-500 text-xs tracking-[0] leading-[normal]">
-                {position ? position.toUpperCase() : 'ADMINISTRATOR'}
+                {position ? position.toUpperCase() : ''}
               </div>
             </div>
             {/* dropdown indicator */}

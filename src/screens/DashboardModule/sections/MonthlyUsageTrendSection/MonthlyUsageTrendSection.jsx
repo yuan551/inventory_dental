@@ -100,7 +100,7 @@ export const MonthlyUsageTrendSection = ({
       <div className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(circle at 20% 20%, rgba(255,212,130,0.25), transparent 60%)" }} />
       <div className="h-full flex flex-col">
         <div className="flex-1">
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer width="100%" height={320}>
             <AreaChart data={data} margin={{ top: 10, left: 10, right: 10, bottom: 0 }}>
               <defs>
                 {series.map((s, i) => (
