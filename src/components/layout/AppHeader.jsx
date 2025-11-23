@@ -130,8 +130,9 @@ export const AppHeader = ({ title, subtitle, searchPlaceholder = "Search invento
     return null;
   };
 
-  const removeHighlights = (root = document.querySelector('main') || document.body) => {
+  const removeHighlights = (root = document.querySelector('.search-highlight-target')) => {
     try {
+      if (!root) return;
       const marks = Array.from(root.querySelectorAll('.search-highlight'));
       for (const m of marks) {
         const txt = document.createTextNode(m.textContent || '');
@@ -143,7 +144,7 @@ export const AppHeader = ({ title, subtitle, searchPlaceholder = "Search invento
   };
 
   const highlightPage = (q) => {
-    const root = document.querySelector('main') || document.body;
+    const root = document.querySelector('.search-highlight-target');
     if (!q) { removeHighlights(root); return; }
     const pattern = new RegExp(escapeRegExp(q), 'gi');
 
