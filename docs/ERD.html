@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Entity Relationship Diagram - Dental Clinic Inventory Management</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            background-color: #ffffff;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        
+        .container {
+            width: 100%;
+            max-width: 100%;
+            overflow-x: auto;
+        }
+        
+        h1 {
+            text-align: center;
+            font-size: 28px;
+            font-weight: bold;
+            margin-bottom: 30px;
+            color: #333;
+        }
+        
+        svg {
+            display: block;
+            margin: 0 auto;
+        }
+        
+        .entity-rect {
+            fill: #FFD4A3;
+            stroke: #333;
+            stroke-width: 2;
+        }
+        
+        .attribute-oval {
+            fill: #B8E6E6;
+            stroke: #333;
+            stroke-width: 1.5;
+        }
+        
+        .pk-attribute-oval {
+            fill: #A0D8D8;
+            stroke: #333;
+            stroke-width: 2;
+        }
+        
+        .connection-line {
+            stroke: #333;
+            stroke-width: 1.5;
+            fill: none;
+        }
+        
+        .entity-text {
+            font-size: 16px;
+            font-weight: bold;
+            text-anchor: middle;
+            dominant-baseline: middle;
+            fill: #333;
+        }
+        
+        .attribute-text {
+            font-size: 12px;
+            text-anchor: middle;
+            dominant-baseline: middle;
+            fill: #333;
+        }
+        
+        .pk-text {
+            font-size: 12px;
+            text-anchor: middle;
+            dominant-baseline: middle;
+            fill: #333;
+            font-weight: bold;
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>ENTITY RELATIONSHIP DIAGRAM</h1>
+        <svg width="4200" height="3500" xmlns="http://www.w3.org/2000/svg">
+            <!-- Orders Entity -->
+            <g id="orders">
+                <rect class="entity-rect" x="200" y="100" width="180" height="80" rx="5"/>
+                <text class="entity-text" x="290" y="140">ORDERS</text>
+                
+                <!-- order_id (PK) -->
+                <ellipse class="pk-attribute-oval" cx="150" cy="50" rx="60" ry="30"/>
+                <text class="pk-text" x="150" y="50">order_id</text>
+                <line class="connection-line" x1="150" y1="80" x2="230" y2="115"/>
+                
+                <!-- supplier_id (FK) -->
+                <ellipse class="attribute-oval" cx="290" cy="30" rx="70" ry="30"/>
+                <text class="attribute-text" x="290" y="30">supplier_id (FK)</text>
+                <line class="connection-line" x1="290" y1="60" x2="290" y2="100"/>
+                
+                <!-- order_date -->
+                <ellipse class="attribute-oval" cx="430" cy="50" rx="65" ry="30"/>
+                <text class="attribute-text" x="430" y="50">order_date</text>
+                <line class="connection-line" x1="400" y1="70" x2="350" y2="115"/>
+                
+                <!-- status -->
+                <ellipse class="attribute-oval" cx="150" cy="230" rx="50" ry="30"/>
+                <text class="attribute-text" x="150" y="230">status</text>
+                <line class="connection-line" x1="180" y1="215" x2="230" y2="165"/>
+                
+                <!-- total_cost -->
+                <ellipse class="attribute-oval" cx="430" cy="230" rx="60" ry="30"/>
+                <text class="attribute-text" x="430" y="230">total_cost</text>
+                <line class="connection-line" x1="400" y1="215" x2="350" y2="165"/>
+            </g>
+            
+            <!-- Suppliers Entity -->
+            <g id="suppliers">
+                <rect class="entity-rect" x="700" y="100" width="180" height="80" rx="5"/>
+                <text class="entity-text" x="790" y="140">SUPPLIERS</text>
+                
+                <!-- supplier_id (PK) -->
+                <ellipse class="pk-attribute-oval" cx="650" cy="50" rx="70" ry="30"/>
+                <text class="pk-text" x="650" y="50">supplier_id</text>
+                <line class="connection-line" x1="680" y1="70" x2="730" y2="115"/>
+                
+                <!-- supplier_name -->
+                <ellipse class="attribute-oval" cx="790" cy="30" rx="80" ry="30"/>
+                <text class="attribute-text" x="790" y="30">supplier_name</text>
+                <line class="connection-line" x1="790" y1="60" x2="790" y2="100"/>
+                
+                <!-- contact_person -->
+                <ellipse class="attribute-oval" cx="930" cy="50" rx="85" ry="30"/>
+                <text class="attribute-text" x="930" y="50">contact_person</text>
+                <line class="connection-line" x1="900" y1="70" x2="850" y2="115"/>
+                
+                <!-- phone -->
+                <ellipse class="attribute-oval" cx="650" cy="230" rx="50" ry="30"/>
+                <text class="attribute-text" x="650" y="230">phone</text>
+                <line class="connection-line" x1="680" y1="215" x2="730" y2="165"/>
+                
+                <!-- address -->
+                <ellipse class="attribute-oval" cx="930" cy="230" rx="55" ry="30"/>
+                <text class="attribute-text" x="930" y="230">address</text>
+                <line class="connection-line" x1="900" y1="215" x2="850" y2="165"/>
+            </g>
+            
+            <!-- Medicine Entity -->
+            <g id="medicine">
+                <rect class="entity-rect" x="200" y="450" width="180" height="80" rx="5"/>
+                <text class="entity-text" x="290" y="490">MEDICINE</text>
+                
+                <!-- medicine_id (PK) -->
+                <ellipse class="pk-attribute-oval" cx="100" cy="380" rx="75" ry="30"/>
+                <text class="pk-text" x="100" y="380">medicine_id</text>
+                <line class="connection-line" x1="150" y1="400" x2="215" y2="465"/>
+                
+                <!-- supplier_id (FK) -->
+                <ellipse class="attribute-oval" cx="240" cy="350" rx="70" ry="30"/>
+                <text class="attribute-text" x="240" y="350">supplier_id (FK)</text>
+                <line class="connection-line" x1="250" y1="380" x2="265" y2="450"/>
+                
+                <!-- waste_id (FK) -->
+                <ellipse class="attribute-oval" cx="380" cy="350" rx="65" ry="30"/>
+                <text class="attribute-text" x="380" y="350">waste_id (FK)</text>
+                <line class="connection-line" x1="360" y1="375" x2="315" y2="455"/>
+                
+                <!-- item_name -->
+                <ellipse class="attribute-oval" cx="100" cy="620" rx="65" ry="30"/>
+                <text class="attribute-text" x="100" y="620">item_name</text>
+                <line class="connection-line" x1="150" y1="605" x2="215" y2="515"/>
+                
+                <!-- item_type -->
+                <ellipse class="attribute-oval" cx="240" cy="650" rx="60" ry="30"/>
+                <text class="attribute-text" x="240" y="650">item_type</text>
+                <line class="connection-line" x1="250" y1="625" x2="265" y2="530"/>
+                
+                <!-- generic_name -->
+                <ellipse class="attribute-oval" cx="380" cy="650" rx="80" ry="30"/>
+                <text class="attribute-text" x="380" y="650">generic_name</text>
+                <line class="connection-line" x1="360" y1="630" x2="315" y2="525"/>
+                
+                <!-- created_date -->
+                <ellipse class="attribute-oval" cx="480" cy="400" rx="75" ry="30"/>
+                <text class="attribute-text" x="480" y="400">created_date</text>
+                <line class="connection-line" x1="445" y1="420" x2="365" y2="465"/>
+                
+                <!-- updated_date -->
+                <ellipse class="attribute-oval" cx="480" cy="580" rx="75" ry="30"/>
+                <text class="attribute-text" x="480" y="580">updated_date</text>
+                <line class="connection-line" x1="445" y1="565" x2="365" y2="515"/>
+                
+                <!-- quantity -->
+                <ellipse class="attribute-oval" cx="50" cy="490" rx="55" ry="30"/>
+                <text class="attribute-text" x="50" y="490">quantity</text>
+                <line class="connection-line" x1="105" y1="490" x2="200" y2="490"/>
+                
+                <!-- item_code -->
+                <ellipse class="attribute-oval" cx="530" cy="490" rx="65" ry="30"/>
+                <text class="attribute-text" x="530" y="490">item_code</text>
+                <line class="connection-line" x1="475" y1="490" x2="380" y2="490"/>
+                
+                <!-- description -->
+                <ellipse class="attribute-oval" cx="580" cy="460" rx="70" ry="30"/>
+                <text class="attribute-text" x="580" y="460">description</text>
+                <line class="connection-line" x1="520" y1="470" x2="380" y2="485"/>
+                
+                <!-- dosage_form -->
+                <ellipse class="attribute-oval" cx="580" cy="520" rx="75" ry="30"/>
+                <text class="attribute-text" x="580" y="520">dosage_form</text>
+                <line class="connection-line" x1="520" y1="510" x2="380" y2="495"/>
+                
+                <!-- expiry_date -->
+                <ellipse class="attribute-oval" cx="10" cy="550" rx="70" ry="30"/>
+                <text class="attribute-text" x="10" y="550">expiry_date</text>
+                <line class="connection-line" x1="75" y1="540" x2="205" y2="505"/>
+                
+                <!-- unit_of_measure -->
+                <ellipse class="attribute-oval" cx="10" cy="430" rx="90" ry="30"/>
+                <text class="attribute-text" x="10" y="430">unit_of_measure</text>
+                <line class="connection-line" x1="95" y1="445" x2="205" y2="475"/>
+            </g>
+            
+            <!-- Consumables Entity -->
+            <g id="consumables">
+                <rect class="entity-rect" x="700" y="450" width="200" height="80" rx="5"/>
+                <text class="entity-text" x="800" y="490">CONSUMABLES</text>
+                
+                <!-- consumable_id (PK) -->
+                <ellipse class="pk-attribute-oval" cx="650" cy="380" rx="90" ry="30"/>
+                <text class="pk-text" x="650" y="380">consumable_id</text>
+                <line class="connection-line" x1="700" y1="400" x2="730" y2="465"/>
+                
+                <!-- supplier_id (FK) -->
+                <ellipse class="attribute-oval" cx="800" cy="350" rx="70" ry="30"/>
+                <text class="attribute-text" x="800" y="350">supplier_id (FK)</text>
+                <line class="connection-line" x1="800" y1="380" x2="800" y2="450"/>
+                
+                <!-- waste_id (FK) -->
+                <ellipse class="attribute-oval" cx="950" cy="380" rx="65" ry="30"/>
+                <text class="attribute-text" x="950" y="380">waste_id (FK)</text>
+                <line class="connection-line" x1="920" y1="400" x2="870" y2="465"/>
+                
+                <!-- item_name -->
+                <ellipse class="attribute-oval" cx="650" cy="620" rx="65" ry="30"/>
+                <text class="attribute-text" x="650" y="620">item_name</text>
+                <line class="connection-line" x1="700" y1="605" x2="730" y2="515"/>
+                
+                <!-- description -->
+                <ellipse class="attribute-oval" cx="800" cy="650" rx="70" ry="30"/>
+                <text class="attribute-text" x="800" y="650">description</text>
+                <line class="connection-line" x1="800" y1="625" x2="800" y2="530"/>
+                
+                <!-- quantity -->
+                <ellipse class="attribute-oval" cx="950" cy="620" rx="55" ry="30"/>
+                <text class="attribute-text" x="950" y="620">quantity</text>
+                <line class="connection-line" x1="920" y1="605" x2="870" y2="515"/>
+                
+                <!-- delivered_date -->
+                <ellipse class="attribute-oval" cx="1050" cy="490" rx="85" ry="30"/>
+                <text class="attribute-text" x="1050" y="490">delivered_date</text>
+                <line class="connection-line" x1="995" y1="490" x2="900" y2="490"/>
+            </g>
+            
+            <!-- Equipment Entity -->
+            <g id="equipment">
+                <rect class="entity-rect" x="1200" y="450" width="180" height="80" rx="5"/>
+                <text class="entity-text" x="1290" y="490">EQUIPMENT</text>
+                
+                <!-- equipment_id (PK) -->
+                <ellipse class="pk-attribute-oval" cx="1100" cy="380" rx="85" ry="30"/>
+                <text class="pk-text" x="1100" y="380">equipment_id</text>
+                <line class="connection-line" x1="1150" y1="400" x2="1215" y2="465"/>
+                
+                <!-- supplier_id (FK) -->
+                <ellipse class="attribute-oval" cx="1240" cy="350" rx="70" ry="30"/>
+                <text class="attribute-text" x="1240" y="350">supplier_id (FK)</text>
+                <line class="connection-line" x1="1250" y1="380" x2="1265" y2="450"/>
+                
+                <!-- waste_id (FK) -->
+                <ellipse class="attribute-oval" cx="1380" cy="350" rx="65" ry="30"/>
+                <text class="attribute-text" x="1380" y="350">waste_id (FK)</text>
+                <line class="connection-line" x1="1360" y1="375" x2="1315" y2="455"/>
+                
+                <!-- equipment_name -->
+                <ellipse class="attribute-oval" cx="1100" cy="620" rx="95" ry="30"/>
+                <text class="attribute-text" x="1100" y="620">equipment_name</text>
+                <line class="connection-line" x1="1150" y1="605" x2="1215" y2="515"/>
+                
+                <!-- asset_code -->
+                <ellipse class="attribute-oval" cx="1240" cy="650" rx="70" ry="30"/>
+                <text class="attribute-text" x="1240" y="650">asset_code</text>
+                <line class="connection-line" x1="1250" y1="625" x2="1265" y2="530"/>
+                
+                <!-- serial_number -->
+                <ellipse class="attribute-oval" cx="1380" cy="650" rx="85" ry="30"/>
+                <text class="attribute-text" x="1380" y="650">serial_number</text>
+                <line class="connection-line" x1="1360" y1="630" x2="1315" y2="525"/>
+                
+                <!-- location -->
+                <ellipse class="attribute-oval" cx="1480" cy="400" rx="60" ry="30"/>
+                <text class="attribute-text" x="1480" y="400">location</text>
+                <line class="connection-line" x1="1445" y1="420" x2="1365" y2="465"/>
+                
+                <!-- purchase_date -->
+                <ellipse class="attribute-oval" cx="1480" cy="580" rx="85" ry="30"/>
+                <text class="attribute-text" x="1480" y="580">purchase_date</text>
+                <line class="connection-line" x1="1445" y1="565" x2="1365" y2="515"/>
+                
+                <!-- purchase_cost -->
+                <ellipse class="attribute-oval" cx="1050" cy="490" rx="85" ry="30"/>
+                <text class="attribute-text" x="1050" y="490">purchase_cost</text>
+                <line class="connection-line" x1="1105" y1="490" x2="1200" y2="490"/>
+                
+                <!-- next_maintenance -->
+                <ellipse class="attribute-oval" cx="1530" cy="490" rx="105" ry="30"/>
+                <text class="attribute-text" x="1530" y="490">next_maintenance</text>
+                <line class="connection-line" x1="1475" y1="490" x2="1380" y2="490"/>
+                
+                <!-- status -->
+                <ellipse class="attribute-oval" cx="1580" cy="460" rx="50" ry="30"/>
+                <text class="attribute-text" x="1580" y="460">status</text>
+                <line class="connection-line" x1="1540" y1="470" x2="1380" y2="485"/>
+                
+                <!-- created_date -->
+                <ellipse class="attribute-oval" cx="1580" cy="520" rx="75" ry="30"/>
+                <text class="attribute-text" x="1580" y="520">created_date</text>
+                <line class="connection-line" x1="1540" y1="510" x2="1380" y2="495"/>
+            </g>
+            
+            <!-- Waste Disposals Entity -->
+            <g id="waste_disposals">
+                <rect class="entity-rect" x="200" y="900" width="220" height="80" rx="5"/>
+                <text class="entity-text" x="310" y="940">WASTE_DISPOSALS</text>
+                
+                <!-- waste_id (PK) -->
+                <ellipse class="pk-attribute-oval" cx="150" cy="820" rx="65" ry="30"/>
+                <text class="pk-text" x="150" y="820">waste_id</text>
+                <line class="connection-line" x1="180" y1="840" x2="230" y2="915"/>
+                
+                <!-- medicine_id (FK) -->
+                <ellipse class="attribute-oval" cx="280" cy="800" rx="80" ry="30"/>
+                <text class="attribute-text" x="280" y="800">medicine_id (FK)</text>
+                <line class="connection-line" x1="280" y1="830" x2="280" y2="900"/>
+                
+                <!-- consumable_id (FK) -->
+                <ellipse class="attribute-oval" cx="420" cy="820" rx="95" ry="30"/>
+                <text class="attribute-text" x="420" y="820">consumable_id (FK)</text>
+                <line class="connection-line" x1="390" y1="840" x2="350" y2="915"/>
+                
+                <!-- equipment_id (FK) -->
+                <ellipse class="attribute-oval" cx="150" cy="1070" rx="85" ry="30"/>
+                <text class="attribute-text" x="150" y="1070">equipment_id (FK)</text>
+                <line class="connection-line" x1="190" y1="1055" x2="230" y2="965"/>
+                
+                <!-- quantity -->
+                <ellipse class="attribute-oval" cx="280" cy="1090" rx="55" ry="30"/>
+                <text class="attribute-text" x="280" y="1090">quantity</text>
+                <line class="connection-line" x1="280" y1="1065" x2="280" y2="980"/>
+                
+                <!-- reason -->
+                <ellipse class="attribute-oval" cx="420" cy="1070" rx="50" ry="30"/>
+                <text class="attribute-text" x="420" y="1070">reason</text>
+                <line class="connection-line" x1="390" y1="1055" x2="350" y2="965"/>
+                
+                <!-- disposal_date -->
+                <ellipse class="attribute-oval" cx="540" cy="880" rx="80" ry="30"/>
+                <text class="attribute-text" x="540" y="880">disposal_date</text>
+                <line class="connection-line" x1="495" y1="900" x2="420" y2="930"/>
+                
+                <!-- method -->
+                <ellipse class="attribute-oval" cx="540" cy="1000" rx="55" ry="30"/>
+                <text class="attribute-text" x="540" y="1000">method</text>
+                <line class="connection-line" x1="495" y1="985" x2="420" y2="950"/>
+                
+                <!-- value_lost -->
+                <ellipse class="attribute-oval" cx="60" cy="940" rx="65" ry="30"/>
+                <text class="attribute-text" x="60" y="940">value_lost</text>
+                <line class="connection-line" x1="120" y1="940" x2="200" y2="940"/>
+                
+                <!-- status -->
+                <ellipse class="attribute-oval" cx="560" cy="940" rx="50" ry="30"/>
+                <text class="attribute-text" x="560" y="940">status</text>
+                <line class="connection-line" x1="510" y1="940" x2="420" y2="940"/>
+            </g>
+            
+            <!-- Inventory Stock Entity -->
+            <g id="inventory_stock">
+                <rect class="entity-rect" x="700" y="900" width="220" height="80" rx="5"/>
+                <text class="entity-text" x="810" y="940">INVENTORY_STOCK</text>
+                
+                <!-- stock_id (PK) -->
+                <ellipse class="pk-attribute-oval" cx="650" cy="820" rx="60" ry="30"/>
+                <text class="pk-text" x="650" y="820">stock_id</text>
+                <line class="connection-line" x1="680" y1="840" x2="730" y2="915"/>
+                
+                <!-- medicine_id (FK) -->
+                <ellipse class="attribute-oval" cx="780" cy="800" rx="80" ry="30"/>
+                <text class="attribute-text" x="780" y="800">medicine_id (FK)</text>
+                <line class="connection-line" x1="780" y1="830" x2="780" y2="900"/>
+                
+                <!-- consumable_id (FK) -->
+                <ellipse class="attribute-oval" cx="920" cy="820" rx="95" ry="30"/>
+                <text class="attribute-text" x="920" y="820">consumable_id (FK)</text>
+                <line class="connection-line" x1="890" y1="840" x2="850" y2="915"/>
+                
+                <!-- equipment_id (FK) -->
+                <ellipse class="attribute-oval" cx="650" cy="1070" rx="85" ry="30"/>
+                <text class="attribute-text" x="650" y="1070">equipment_id (FK)</text>
+                <line class="connection-line" x1="690" y1="1055" x2="730" y2="965"/>
+                
+                <!-- location -->
+                <ellipse class="attribute-oval" cx="780" cy="1090" rx="60" ry="30"/>
+                <text class="attribute-text" x="780" y="1090">location</text>
+                <line class="connection-line" x1="780" y1="1065" x2="780" y2="980"/>
+                
+                <!-- quantity -->
+                <ellipse class="attribute-oval" cx="920" cy="1070" rx="55" ry="30"/>
+                <text class="attribute-text" x="920" y="1070">quantity</text>
+                <line class="connection-line" x1="890" y1="1055" x2="850" y2="965"/>
+                
+                <!-- last_update -->
+                <ellipse class="attribute-oval" cx="1040" cy="880" rx="75" ry="30"/>
+                <text class="attribute-text" x="1040" y="880">last_update</text>
+                <line class="connection-line" x1="995" y1="900" x2="920" y2="930"/>
+                
+                <!-- updated_date -->
+                <ellipse class="attribute-oval" cx="1040" cy="1000" rx="80" ry="30"/>
+                <text class="attribute-text" x="1040" y="1000">updated_date</text>
+                <line class="connection-line" x1="995" y1="985" x2="920" y2="950"/>
+                
+                <!-- stock_level -->
+                <ellipse class="attribute-oval" cx="560" cy="940" rx="70" ry="30"/>
+                <text class="attribute-text" x="560" y="940">stock_level</text>
+                <line class="connection-line" x1="620" y1="940" x2="700" y2="940"/>
+                
+            </g>
+            
+            <!-- Stock Log Entity -->
+            <g id="stock_log">
+                <rect class="entity-rect" x="1200" y="900" width="180" height="80" rx="5"/>
+                <text class="entity-text" x="1290" y="940">STOCK_LOG</text>
+                
+                <!-- log_id (PK) -->
+                <ellipse class="pk-attribute-oval" cx="1150" cy="820" rx="55" ry="30"/>
+                <text class="pk-text" x="1150" y="820">log_id</text>
+                <line class="connection-line" x1="1180" y1="840" x2="1230" y2="915"/>
+                
+                <!-- stock_id (FK) -->
+                <ellipse class="attribute-oval" cx="1280" cy="800" rx="65" ry="30"/>
+                <text class="attribute-text" x="1280" y="800">stock_id (FK)</text>
+                <line class="connection-line" x1="1280" y1="830" x2="1280" y2="900"/>
+                
+                <!-- action -->
+                <ellipse class="attribute-oval" cx="1420" cy="820" rx="50" ry="30"/>
+                <text class="attribute-text" x="1420" y="820">action</text>
+                <line class="connection-line" x1="1390" y1="840" x2="1350" y2="915"/>
+                
+                <!-- quantity -->
+                <ellipse class="attribute-oval" cx="1150" cy="1070" rx="55" ry="30"/>
+                <text class="attribute-text" x="1150" y="1070">quantity</text>
+                <line class="connection-line" x1="1180" y1="1055" x2="1230" y2="965"/>
+                
+                <!-- location -->
+                <ellipse class="attribute-oval" cx="1280" cy="1090" rx="60" ry="30"/>
+                <text class="attribute-text" x="1280" y="1090">location</text>
+                <line class="connection-line" x1="1280" y1="1065" x2="1280" y2="980"/>
+                
+                <!-- date_time -->
+                <ellipse class="attribute-oval" cx="1420" cy="1070" rx="65" ry="30"/>
+                <text class="attribute-text" x="1420" y="1070">date_time</text>
+                <line class="connection-line" x1="1390" y1="1055" x2="1350" y2="965"/>
+                
+                <!-- notes -->
+                <ellipse class="attribute-oval" cx="1060" cy="940" rx="50" ry="30"/>
+                <text class="attribute-text" x="1060" y="940">notes</text>
+                <line class="connection-line" x1="1110" y1="940" x2="1200" y2="940"/>
+                
+                <ellipse class="attribute-oval" cx="1520" cy="940" rx="50" ry="30"/>
+                <text class="attribute-text" x="1520" y="940">notes</text>
+                <line class="connection-line" x1="1470" y1="940" x2="1380" y2="940"/>
+            </g>
+            
+            <!-- Usage Reports Entity -->
+            <g id="usage_reports">
+                <rect class="entity-rect" x="200" y="1350" width="220" height="80" rx="5"/>
+                <text class="entity-text" x="310" y="1390">USAGE_REPORTS</text>
+                
+                <!-- report_id (PK) -->
+                <ellipse class="pk-attribute-oval" cx="150" cy="1270" rx="65" ry="30"/>
+                <text class="pk-text" x="150" y="1270">report_id</text>
+                <line class="connection-line" x1="180" y1="1290" x2="230" y2="1365"/>
+                
+                <!-- medicine_id (FK) -->
+                <ellipse class="attribute-oval" cx="280" cy="1250" rx="80" ry="30"/>
+                <text class="attribute-text" x="280" y="1250">medicine_id (FK)</text>
+                <line class="connection-line" x1="280" y1="1280" x2="280" y2="1350"/>
+                
+                <!-- consumable_id (FK) -->
+                <ellipse class="attribute-oval" cx="420" cy="1270" rx="95" ry="30"/>
+                <text class="attribute-text" x="420" y="1270">consumable_id (FK)</text>
+                <line class="connection-line" x1="390" y1="1290" x2="350" y2="1365"/>
+                
+                <!-- equipment_id (FK) -->
+                <ellipse class="attribute-oval" cx="150" cy="1520" rx="85" ry="30"/>
+                <text class="attribute-text" x="150" y="1520">equipment_id (FK)</text>
+                <line class="connection-line" x1="190" y1="1505" x2="230" y2="1415"/>
+                
+                <!-- period_type -->
+                <ellipse class="attribute-oval" cx="280" cy="1540" rx="75" ry="30"/>
+                <text class="attribute-text" x="280" y="1540">period_type</text>
+                <line class="connection-line" x1="280" y1="1515" x2="280" y2="1430"/>
+                
+                <!-- period_start -->
+                <ellipse class="attribute-oval" cx="420" cy="1520" rx="75" ry="30"/>
+                <text class="attribute-text" x="420" y="1520">period_start</text>
+                <line class="connection-line" x1="390" y1="1505" x2="350" y2="1415"/>
+                
+                <!-- period_end -->
+                <ellipse class="attribute-oval" cx="540" cy="1330" rx="70" ry="30"/>
+                <text class="attribute-text" x="540" y="1330">period_end</text>
+                <line class="connection-line" x1="495" y1="1350" x2="420" y2="1380"/>
+                
+                <!-- total_used -->
+                <ellipse class="attribute-oval" cx="540" cy="1450" rx="65" ry="30"/>
+                <text class="attribute-text" x="540" y="1450">total_used</text>
+                <line class="connection-line" x1="495" y1="1435" x2="420" y2="1400"/>
+                
+                <!-- total_received -->
+                <ellipse class="attribute-oval" cx="60" cy="1390" rx="85" ry="30"/>
+                <text class="attribute-text" x="60" y="1390">total_received</text>
+                <line class="connection-line" x1="140" y1="1390" x2="200" y2="1390"/>
+                
+                <!-- average_daily_usage -->
+                <ellipse class="attribute-oval" cx="560" cy="1390" rx="110" ry="30"/>
+                <text class="attribute-text" x="560" y="1390">average_daily_usage</text>
+                <line class="connection-line" x1="460" y1="1390" x2="420" y2="1390"/>
+                
+                <!-- total_cost -->
+                <ellipse class="attribute-oval" cx="20" cy="1320" rx="65" ry="30"/>
+                <text class="attribute-text" x="20" y="1320">total_cost</text>
+                <line class="connection-line" x1="80" y1="1335" x2="205" y2="1365"/>
+                
+                <!-- generated_date -->
+                <ellipse class="attribute-oval" cx="20" cy="1460" rx="90" ry="30"/>
+                <text class="attribute-text" x="20" y="1460">generated_date</text>
+                <line class="connection-line" x1="105" y1="1445" x2="205" y2="1415"/>
+            </g>
+            
+            <!-- Maintenance Log Entity -->
+            <g id="maintenance_log">
+                <rect class="entity-rect" x="800" y="1350" width="220" height="80" rx="5"/>
+                <text class="entity-text" x="910" y="1390">MAINTENANCE_LOG</text>
+                
+                <!-- maintenance_id (PK) -->
+                <ellipse class="pk-attribute-oval" cx="750" cy="1270" rx="95" ry="30"/>
+                <text class="pk-text" x="750" y="1270">maintenance_id</text>
+                <line class="connection-line" x1="800" y1="1290" x2="830" y2="1365"/>
+                
+                <!-- equipment_id (FK) -->
+                <ellipse class="attribute-oval" cx="920" cy="1250" rx="85" ry="30"/>
+                <text class="attribute-text" x="920" y="1250">equipment_id (FK)</text>
+                <line class="connection-line" x1="900" y1="1275" x2="880" y2="1350"/>
+                
+                <!-- maintenance_type -->
+                <ellipse class="attribute-oval" cx="1070" cy="1270" rx="105" ry="30"/>
+                <text class="attribute-text" x="1070" y="1270">maintenance_type</text>
+                <line class="connection-line" x1="1015" y1="1290" x2="970" y2="1365"/>
+                
+                <!-- maintenance_date -->
+                <ellipse class="attribute-oval" cx="750" cy="1520" rx="105" ry="30"/>
+                <text class="attribute-text" x="750" y="1520">maintenance_date</text>
+                <line class="connection-line" x1="805" y1="1505" x2="830" y2="1415"/>
+                
+                <!-- next_due_date -->
+                <ellipse class="attribute-oval" cx="920" cy="1540" rx="90" ry="30"/>
+                <text class="attribute-text" x="920" y="1540">next_due_date</text>
+                <line class="connection-line" x1="900" y1="1515" x2="880" y2="1430"/>
+                
+                <!-- performed_by -->
+                <ellipse class="attribute-oval" cx="1070" cy="1520" rx="85" ry="30"/>
+                <text class="attribute-text" x="1070" y="1520">performed_by</text>
+                <line class="connection-line" x1="1020" y1="1505" x2="970" y2="1415"/>
+                
+                <!-- cost -->
+                <ellipse class="attribute-oval" cx="1190" cy="1330" rx="45" ry="30"/>
+                <text class="attribute-text" x="1190" y="1330">cost</text>
+                <line class="connection-line" x1="1145" y1="1345" x2="1020" y2="1380"/>
+                
+                <!-- description -->
+                <ellipse class="attribute-oval" cx="1190" cy="1450" rx="70" ry="30"/>
+                <text class="attribute-text" x="1190" y="1450">description</text>
+                <line class="connection-line" x1="1145" y1="1435" x2="1020" y2="1400"/>
+                
+                <!-- status -->
+                <ellipse class="attribute-oval" cx="670" cy="1390" rx="50" ry="30"/>
+                <text class="attribute-text" x="670" y="1390">status</text>
+                <line class="connection-line" x1="720" y1="1390" x2="800" y2="1390"/>
+                
+                <!-- created_date -->
+                <ellipse class="attribute-oval" cx="1160" cy="1390" rx="75" ry="30"/>
+                <text class="attribute-text" x="1160" y="1390">created_date</text>
+                <line class="connection-line" x1="1085" y1="1390" x2="1020" y2="1390"/>
+            </g>
+            
+            <!-- Relationships -->
+            <!-- Orders to Suppliers -->
+            <line class="connection-line" x1="380" y1="140" x2="700" y2="140" stroke-width="2"/>
+            <text class="attribute-text" x="540" y="130">supplies</text>
+            
+            <!-- Medicine to Suppliers -->
+            <line class="connection-line" x1="290" y1="450" x2="290" y2="300" stroke-width="2"/>
+            <line class="connection-line" x1="290" y1="300" x2="700" y2="180" stroke-width="2"/>
+            <text class="attribute-text" x="490" y="290">supplies</text>
+            
+            <!-- Consumables to Suppliers -->
+            <line class="connection-line" x1="800" y1="450" x2="800" y2="350" stroke-width="2"/>
+            <line class="connection-line" x1="800" y1="350" x2="790" y2="180" stroke-width="2"/>
+            <text class="attribute-text" x="795" y="270">supplies</text>
+            
+            <!-- Equipment to Suppliers -->
+            <line class="connection-line" x1="1290" y1="450" x2="1290" y2="300" stroke-width="2"/>
+            <line class="connection-line" x1="1290" y1="300" x2="880" y2="180" stroke-width="2"/>
+            <text class="attribute-text" x="1085" y="290">supplies</text>
+            
+            <!-- Medicine to Waste Disposals -->
+            <line class="connection-line" x1="290" y1="530" x2="290" y2="750" stroke-width="2"/>
+            <line class="connection-line" x1="290" y1="750" x2="280" y2="900" stroke-width="2"/>
+            <text class="attribute-text" x="285" y="715">disposed</text>
+            
+            <!-- Consumables to Waste Disposals -->
+            <line class="connection-line" x1="800" y1="530" x2="800" y2="750" stroke-width="2"/>
+            <line class="connection-line" x1="800" y1="750" x2="420" y2="900" stroke-width="2"/>
+            <text class="attribute-text" x="610" y="715">disposed</text>
+            
+            <!-- Equipment to Waste Disposals -->
+            <line class="connection-line" x1="1290" y1="530" x2="1290" y2="750" stroke-width="2"/>
+            <line class="connection-line" x1="1290" y1="750" x2="420" y2="980" stroke-width="2"/>
+            <text class="attribute-text" x="855" y="750">disposed</text>
+            
+            <!-- Medicine to Inventory Stock -->
+            <line class="connection-line" x1="380" y1="490" x2="600" y2="490" stroke-width="2"/>
+            <line class="connection-line" x1="600" y1="490" x2="600" y2="750" stroke-width="2"/>
+            <line class="connection-line" x1="600" y1="750" x2="780" y2="900" stroke-width="2"/>
+            <text class="attribute-text" x="600" y="695">stocked</text>
+            
+            <!-- Consumables to Inventory Stock -->
+            <line class="connection-line" x1="800" y1="530" x2="800" y2="900" stroke-width="2"/>
+            <text class="attribute-text" x="810" y="715">stocked</text>
+            
+            <!-- Equipment to Inventory Stock -->
+            <line class="connection-line" x1="1200" y1="490" x2="1100" y2="490" stroke-width="2"/>
+            <line class="connection-line" x1="1100" y1="490" x2="1100" y2="750" stroke-width="2"/>
+            <line class="connection-line" x1="1100" y1="750" x2="920" y2="900" stroke-width="2"/>
+            <text class="attribute-text" x="1100" y="695">stocked</text>
+            
+            <!-- Inventory Stock to Stock Log -->
+            <line class="connection-line" x1="920" y1="940" x2="1200" y2="940" stroke-width="2"/>
+            <text class="attribute-text" x="1060" y="930">logs</text>
+            
+            <!-- Medicine to Usage Reports -->
+            <line class="connection-line" x1="280" y1="650" x2="280" y2="1150" stroke-width="2"/>
+            <line class="connection-line" x1="280" y1="1150" x2="280" y2="1350" stroke-width="2"/>
+            <text class="attribute-text" x="290" y="1000">reported</text>
+            
+            <!-- Consumables to Usage Reports -->
+            <line class="connection-line" x1="700" y1="540" x2="550" y2="540" stroke-width="2"/>
+            <line class="connection-line" x1="550" y1="540" x2="550" y2="1200" stroke-width="2"/>
+            <line class="connection-line" x1="550" y1="1200" x2="420" y2="1350" stroke-width="2"/>
+            <text class="attribute-text" x="550" y="945">reported</text>
+            
+            <!-- Equipment to Usage Reports -->
+            <line class="connection-line" x1="1200" y1="520" x2="650" y2="520" stroke-width="2"/>
+            <line class="connection-line" x1="650" y1="520" x2="650" y2="1200" stroke-width="2"/>
+            <line class="connection-line" x1="650" y1="1200" x2="420" y2="1350" stroke-width="2"/>
+            <text class="attribute-text" x="650" y="860">reported</text>
+            
+            <!-- Equipment to Maintenance Log -->
+            <line class="connection-line" x1="1290" y1="530" x2="1290" y2="1200" stroke-width="2"/>
+            <line class="connection-line" x1="1290" y1="1200" x2="920" y2="1350" stroke-width="2"/>
+            <text class="attribute-text" x="1300" y="940">maintained</text>
+        </svg>
+    </div>
+</body>
+</html>
