@@ -30,6 +30,24 @@ If you are satisfied with the result, you can finally build the project for rele
 npm run build
 ```
 
+## Database Schema
+
+The database schema for the dental clinic inventory management system is documented in a Chen notation Entity Relationship Diagram (ERD). You can view the ERD here:
+
+📊 [View Entity Relationship Diagram](docs/ERD.html)
+
+The ERD includes all entities in the system:
+- **Orders** - Purchase orders from suppliers
+- **Suppliers** - Vendor information
+- **Medicine** - Pharmaceutical inventory
+- **Consumables** - Medical supplies and consumables
+- **Equipment** - Medical equipment and devices
+- **Waste Disposals** - Disposal tracking for expired/damaged items
+- **Inventory Stock** - Current stock levels
+- **Stock Log** - Inventory transaction history
+- **Usage Reports** - Usage statistics and trends
+- **Maintenance Log** - Equipment maintenance records
+
 ## Firebase configuration
 
 Firebase Auth and Firestore are initialized in `src/firebase.js`.
